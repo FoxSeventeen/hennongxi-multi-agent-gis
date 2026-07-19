@@ -67,10 +67,10 @@ Source of truth: `docs/spec.md` at `92e50a6`. Detailed rationale, file scope, an
   - [x] Preserve durable monotonic order and all correlation fields.
   - [x] Replay after disconnect and fall back to PostgreSQL after Redis loss.
   - [x] Pass retention, replay, Redis restart/flush, and no-false-success tests.
-- [ ] **T08 Deliver Data Agent over HTTP** (depends: T02, T04, T05)
-  - [ ] Resolve allow-listed logical data IDs and return normalized checksum-bearing metadata.
-  - [ ] Reject missing/corrupt/mismatched/under-covering inputs with structured errors.
-  - [ ] Pass network contract tests proving no in-process Agent call/path injection.
+- [x] **T08 Deliver Data Agent over HTTP** (depends: T02, T04, T05)
+  - [x] Resolve allow-listed logical data IDs and return normalized checksum-bearing metadata.
+  - [x] Reject missing/corrupt/mismatched/under-covering inputs with structured errors.
+  - [x] Pass network contract tests proving no in-process Agent call/path injection.
 - [ ] **T09 Implement deterministic NDVI/change core** (depends: T01-T02)
   - [ ] Prove NDVI, difference, masks, clipping, alignment, classes, and projected areas.
   - [ ] Preserve CRS/transform/bounds/nodata and reject grid mismatches.

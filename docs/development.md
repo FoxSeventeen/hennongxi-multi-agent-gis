@@ -112,3 +112,30 @@ docker compose run --rm master-agent \
 ```
 
 真实缓存丢失验收还要执行一次 Redis 重启并清空 DB 15，再从新的 Master 进程调用 `EventStore.replay()`；预期来源为 `DURABLE`，数据库事件顺序和任务状态保持不变。该操作只允许使用专用测试库，禁止清空应用 Redis 数据库。
+
+## Data Agent 数据准备
+
+Data Agent 只接受共享契约定义的五个逻辑数据 ID：`watershed`、`before_red`、`before_nir`、`after_red`、`after_nir`。请求必须同时包含 `task_id`、固定的 `prepare_data` 步骤、attempt 和 correlation ID；额外路径字段、未知 ID 或不完整集合会在 HTTP 边界返回结构化 422。服务不会把清单路径、缓存路径或上游来源 URL 放入响应。
+
+轻量的已批准清单和完整流域边界随后端镜像打包；四个约 161 MB 的栅格仍位于 Git 忽略的 `data/cache/demo/`，并复制到项目 `data-cache` 命名卷。首次准备或重建空卷时执行：
+
+```bash
+docker compose up --build --detach --wait data-agent
+docker compose cp data/cache/demo/before_red.tif data-agent:/data/cache/before_red.tif
+docker compose cp data/cache/demo/before_nir.tif data-agent:/data/cache/before_nir.tif
+docker compose cp data/cache/demo/after_red.tif data-agent:/data/cache/after_red.tif
+docker compose cp data/cache/demo/after_nir.tif data-agent:/data/cache/after_nir.tif
+```
+
+只能复制通过 `data/manifest.json` 校验的这四个文件；不得把任意用户或模型路径映射到卷内。每次准备请求都会重新核对文件大小、SHA-256、CRS、边界、分辨率、nodata、数据类型、完整流域覆盖、有效像元比例和四栅格对齐。完整成功后才返回无路径的 `DataPrepareResult`；缺失、损坏、不对齐或覆盖不足统一返回 `DATA_INVALID`（409），清单不可用返回 `DEPENDENCY_UNAVAILABLE`（503），不会生成部分资产元数据。
+
+服务内测试和真实私网契约测试分别执行：
+
+```bash
+docker compose run --rm data-agent \
+  pytest services/data_agent/tests -q
+docker compose run --rm master-agent \
+  pytest services/data_agent/tests/integration/test_network.py -q
+```
+
+第二条命令从 Master 容器通过 `http://data-agent:8001` 调用内部端点，同时验证真实缓存的 2024-08-12 日期、关联 ID、响应契约和路径注入拒绝。Data Agent 没有宿主端口，跨 Agent 调用不得改成进程内导入。

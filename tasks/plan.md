@@ -302,18 +302,18 @@ The critical path is contracts → persistence/events → raster chain → orche
 
 **Acceptance criteria:**
 
-- [ ] Valid cached inputs return CRS/grid/bounds/nodata/date/checksum metadata tied to task/step/attempt/correlation IDs.
-- [ ] Missing, corrupt, mismatched, or under-covering data returns a structured failure and emits no fabricated metadata.
-- [ ] A network contract test proves Master-style HTTP invocation; no in-process call crosses the service boundary.
+- [x] Valid cached inputs return CRS/grid/bounds/nodata/date/checksum metadata tied to task/step/attempt/correlation IDs.
+- [x] Missing, corrupt, mismatched, or under-covering data returns a structured failure and emits no fabricated metadata.
+- [x] A network contract test proves Master-style HTTP invocation; no in-process call crosses the service boundary.
 
 **Verification:**
 
-- [ ] `docker compose run --rm data-agent pytest services/data_agent/tests -q`
-- [ ] Internal OpenAPI response validates against `packages/contracts`.
+- [x] `docker compose run --rm data-agent pytest services/data_agent/tests -q`
+- [x] Internal OpenAPI response validates against `packages/contracts`.
 
 **Dependencies:** T02, T04, T05.
 
-**Files likely touched:** `services/data_agent/app/`, `services/data_agent/tests/`, shared fixture helpers.
+**Files touched:** `services/data_agent/src/hennongxi_data_agent/`, `services/data_agent/tests/`, shared contracts/OpenAPI, backend image and runtime documentation.
 
 **Estimated scope:** M.
 
