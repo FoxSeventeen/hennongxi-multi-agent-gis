@@ -6,12 +6,13 @@ import argparse
 from pathlib import Path
 
 from hennongxi_data_agent.dataset import (
+    DatasetManifest,
     ManifestValidationError,
     load_manifest,
     run_preflight,
 )
 
-__all__ = ["ManifestValidationError", "load_manifest", "run_preflight"]
+__all__ = ["DatasetManifest", "ManifestValidationError", "load_manifest", "run_preflight"]
 
 
 def _parser() -> argparse.ArgumentParser:
