@@ -1,0 +1,39 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+
+# IDE and local tooling
+.idea/
+.vscode/
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# Node
+node_modules/
+dist/
+coverage/
+playwright-report/
+test-results/
+
+# Runtime data and generated artifacts
+data/raw/
+data/outputs/
+data/cache/
+*.tif
+*.tiff
+*.jp2
+*.sqlite
+
+# Temporary document review artifacts
+tmp/
+
+# Docker runtime files
+*.pid
+*.log
