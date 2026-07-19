@@ -13,7 +13,7 @@ COPY packages ./packages
 COPY services ./services
 
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --no-editable
+    uv sync --frozen --all-groups --no-editable
 
 FROM python:3.12.13-slim-bookworm AS runtime
 
@@ -36,6 +36,11 @@ COPY --from=builder --chown=app:app /app/.venv /app/.venv
 COPY --from=builder --chown=app:app /app/pyproject.toml /app/pyproject.toml
 COPY --from=builder --chown=app:app /app/packages /app/packages
 COPY --from=builder --chown=app:app /app/services /app/services
+COPY --chown=app:app alembic.ini /app/alembic.ini
+COPY --chown=app:app docs/openapi.yaml /app/docs/openapi.yaml
+COPY --chown=app:app infra/db/migrations /app/infra/db/migrations
+COPY --chown=app:app scripts /app/scripts
+COPY --chown=app:app tests /app/tests
 
 USER 10001:10001
 

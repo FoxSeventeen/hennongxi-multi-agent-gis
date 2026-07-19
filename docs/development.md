@@ -75,3 +75,25 @@ python scripts/compose_smoke.py
 ```
 
 脚本成功后保留运行中的栈，并清理自身的持久化标记。只有目标机上的该脚本真实通过后，才能勾选 G4/T04；静态 Compose 测试不能代替容器验收。
+
+## PostGIS 迁移与持久化仓储
+
+数据库迁移只允许向前执行。`downgrade()` 会主动报错；已经共享或部署的迁移文件不得改写，后续模型变化必须新增 revision。首次启动或拉取新 revision 后执行：
+
+```bash
+docker compose run --rm master-agent alembic upgrade head
+docker compose run --rm master-agent alembic current --check-heads
+```
+
+连接串只从 `DATABASE_URL` 读取。Alembic 配置、源码和日志中不得写入真实口令。Master 仓储使用每次操作一个异步会话；任务状态、attempt、step、事件及事件产物关联在同一事务提交，异常时整体回滚。step 依赖必须引用同一 task/attempt 中已存在的 step。事件读取使用 `after_sequence` 游标，每批限制为 1–1000 条，并批量加载该批次的产物。LLM 记录只持久化模型名、耗时、token 数、状态、响应摘要和安全错误码，不保存 API Key、原始 prompt 或原始响应正文。
+
+T06 的真实 PostGIS 验证命令如下：
+
+```bash
+docker compose run --rm master-agent \
+  pytest services/master/tests/integration/test_migration.py -q
+docker compose run --rm master-agent \
+  pytest services/master/tests/integration/test_repository.py -q
+```
+
+仓储测试会覆盖完整任务图重建、非法状态的原子回滚、数据库约束拒绝，以及 Worker 租约的独占、续租、过期接管和陈旧租约保护。若需要证明空库升级，应创建一次性数据库、执行 `alembic upgrade head` 和上述测试，然后删除该临时数据库；不要对已有开发库执行降级或手工改写 `alembic_version`。
