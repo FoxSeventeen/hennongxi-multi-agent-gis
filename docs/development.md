@@ -97,3 +97,18 @@ docker compose run --rm master-agent \
 ```
 
 仓储测试会覆盖完整任务图重建、非法状态的原子回滚、数据库约束拒绝，以及 Worker 租约的独占、续租、过期接管和陈旧租约保护。若需要证明空库升级，应创建一次性数据库、执行 `alembic upgrade head` 和上述测试，然后删除该临时数据库；不要对已有开发库执行降级或手工改写 `alembic_version`。
+
+## Redis 事件缓存与持久回放
+
+Master 的 `EventStore` 先在 PostGIS 的同一事务中提交任务状态和不可变事件，再把完整 `TaskEvent` JSON 复制到按任务隔离的 Redis Stream。Stream ID 直接使用数据库生成的 `{sequence}-0`，并通过精确 `MAXLEN` 限制每个任务的缓存条目。Redis 写入失败只会让追加结果返回 `cached=false`，不会回滚已经提交的工作流事实，也不会把任务伪装为成功。
+
+回放使用排他的 `after_sequence` 游标，每批只允许 1–1000 条。实现会先读取数据库事实，再读取并验证 Redis 条目；只有缓存批次与数据库批次完全一致时才返回缓存结果。Redis 不可用、条目损坏、缓存被裁剪或清空时，一律返回 PostGIS 中的完整批次。T17 的 SSE 只能复用这个边界，不得自行把 Redis 当作事实来源。
+
+应用默认使用 `REDIS_URL` 指向的数据库；事件集成测试把路径替换为 Redis DB 15，并在测试前后只清空该测试库。验证命令为：
+
+```bash
+docker compose run --rm master-agent \
+  pytest services/master/tests/integration/test_event_store.py -q
+```
+
+真实缓存丢失验收还要执行一次 Redis 重启并清空 DB 15，再从新的 Master 进程调用 `EventStore.replay()`；预期来源为 `DURABLE`，数据库事件顺序和任务状态保持不变。该操作只允许使用专用测试库，禁止清空应用 Redis 数据库。

@@ -63,10 +63,10 @@ Source of truth: `docs/spec.md` at `92e50a6`. Detailed rationale, file scope, an
 
 ## Day 3 — Events, data preparation, and raster core
 
-- [ ] **T07 Add ordered Redis event transport** (depends: T06)
-  - [ ] Preserve durable monotonic order and all correlation fields.
-  - [ ] Replay after disconnect and fall back to PostgreSQL after Redis loss.
-  - [ ] Pass retention, replay, Redis restart/flush, and no-false-success tests.
+- [x] **T07 Add ordered Redis event transport** (depends: T06)
+  - [x] Preserve durable monotonic order and all correlation fields.
+  - [x] Replay after disconnect and fall back to PostgreSQL after Redis loss.
+  - [x] Pass retention, replay, Redis restart/flush, and no-false-success tests.
 - [ ] **T08 Deliver Data Agent over HTTP** (depends: T02, T04, T05)
   - [ ] Resolve allow-listed logical data IDs and return normalized checksum-bearing metadata.
   - [ ] Reject missing/corrupt/mismatched/under-covering inputs with structured errors.

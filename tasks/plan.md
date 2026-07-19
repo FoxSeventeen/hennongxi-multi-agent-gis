@@ -281,18 +281,18 @@ The critical path is contracts → persistence/events → raster chain → orche
 
 **Acceptance criteria:**
 
-- [ ] Published events preserve per-task order and all correlation fields, with stable database sequence IDs.
-- [ ] Replay works after a subscriber disconnect and falls back to PostgreSQL after Redis flush/restart.
-- [ ] Stream retention is bounded and cache failure never converts a task to `COMPLETED` or loses durable history.
+- [x] Published events preserve per-task order and all correlation fields, with stable database sequence IDs.
+- [x] Replay works after a subscriber disconnect and falls back to PostgreSQL after Redis flush/restart.
+- [x] Stream retention is bounded and cache failure never converts a task to `COMPLETED` or loses durable history.
 
 **Verification:**
 
-- [ ] `docker compose run --rm master pytest services/master/tests/integration/test_event_store.py -q`
-- [ ] Redis restart/flush integration case passes.
+- [x] `docker compose run --rm master-agent pytest services/master/tests/integration/test_event_store.py -q`
+- [x] Redis restart/flush integration case passes.
 
 **Dependencies:** T06.
 
-**Files likely touched:** `services/master/app/events.py`, `services/master/tests/integration/test_event_store.py`, Redis configuration.
+**Files touched:** `services/master/src/hennongxi_master/events.py`, `services/master/tests/integration/test_event_store.py`, runtime/ADR documentation.
 
 **Estimated scope:** S.
 
