@@ -14,7 +14,7 @@ from typing import Annotated, Literal, Self
 import geopandas as gpd  # type: ignore[import-untyped]
 import numpy as np
 import rasterio  # type: ignore[import-untyped]
-from hennongxi_contracts import (  # type: ignore[import-untyped]
+from hennongxi_contracts import (
     DataAssetRef,
     LogicalDatasetId,
     RasterGrid,
@@ -384,7 +384,8 @@ def _inspect_raster(
                 float(dataset.transform.e),
                 float(dataset.transform.f),
             )
-            bounds = tuple(float(value) for value in dataset.bounds)
+            left, bottom, right, top = dataset.bounds
+            bounds = (float(left), float(bottom), float(right), float(top))
             grid = RasterGrid(
                 crs=dataset.crs.to_string(),
                 width=dataset.width,
