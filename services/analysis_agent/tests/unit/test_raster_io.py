@@ -86,6 +86,7 @@ def test_clip_band_reprojects_complete_geometry_and_preserves_grid_metadata() ->
     assert result.grid.crs == raster_crs
     assert result.grid.transform == from_origin(400_010, 3_500_000, 10, 10)
     assert result.grid.shape == (3, 3)
+    assert result.grid.bounds == (400_010.0, 3_499_970.0, 400_040.0, 3_500_000.0)
     assert result.nodata == -9999
     np.testing.assert_array_equal(
         result.valid_mask,

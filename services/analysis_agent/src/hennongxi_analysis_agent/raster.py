@@ -8,6 +8,7 @@ import numpy as np
 from affine import Affine  # type: ignore[import-untyped]
 from numpy.typing import NDArray
 from rasterio.crs import CRS  # type: ignore[import-untyped]
+from rasterio.transform import array_bounds  # type: ignore[import-untyped]
 
 OUTPUT_NODATA = -9999.0
 
@@ -28,6 +29,11 @@ class RasterGrid:
     @property
     def shape(self) -> tuple[int, int]:
         return (self.height, self.width)
+
+    @property
+    def bounds(self) -> tuple[float, float, float, float]:
+        west, south, east, north = array_bounds(self.height, self.width, self.transform)
+        return (float(west), float(south), float(east), float(north))
 
 
 @dataclass(frozen=True, slots=True)
