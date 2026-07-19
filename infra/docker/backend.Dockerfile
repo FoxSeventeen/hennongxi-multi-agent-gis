@@ -38,6 +38,8 @@ COPY --from=builder --chown=app:app /app/packages /app/packages
 COPY --from=builder --chown=app:app /app/services /app/services
 COPY --chown=app:app alembic.ini /app/alembic.ini
 COPY --chown=app:app docs/openapi.yaml /app/docs/openapi.yaml
+COPY --chown=app:app data/manifest.json /app/data/manifest.json
+COPY --chown=app:app data/boundaries /app/data/boundaries
 COPY --chown=app:app infra/db/migrations /app/infra/db/migrations
 COPY --chown=app:app scripts /app/scripts
 COPY --chown=app:app tests /app/tests
