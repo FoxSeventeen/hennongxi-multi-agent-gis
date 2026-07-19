@@ -1,0 +1,17 @@
+[project]
+name = "hennongxi-observability"
+version = "0.1.0"
+description = "Correlation-aware JSON logging and FastAPI middleware"
+requires-python = "==3.12.*"
+dependencies = [
+  "fastapi==0.139.2",
+  "hennongxi-contracts",
+  "structlog==26.1.0",
+]
+
+[tool.uv.sources]
+hennongxi-contracts = { workspace = true }
+
+[build-system]
+requires = ["uv-build==0.11.29"]
+build-backend = "uv_build"

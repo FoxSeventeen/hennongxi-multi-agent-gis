@@ -1,0 +1,242 @@
+{
+  "approval": {
+    "approved_on": "2026-07-19",
+    "gate": "G2",
+    "status": "approved"
+  },
+  "assets": [
+    {
+      "acquired_on": null,
+      "band": null,
+      "band_number": null,
+      "bounds": [
+        110.10833333333336,
+        31.04583333333336,
+        110.53750000000002,
+        31.466666666666697
+      ],
+      "byte_size": 9099,
+      "crs": "EPSG:4326",
+      "data_type": null,
+      "derivation": "Union of eight level-12 polygons whose NEXT_DOWN chain reaches outlet HYBAS_ID 4120733210; downstream Yangtze polygon excluded.",
+      "logical_id": "watershed",
+      "media_type": "application/geo+json",
+      "nodata": null,
+      "path": "boundaries/shennongxi_watershed.geojson",
+      "resolution": null,
+      "resolution_unit": null,
+      "sha256": "1c44b253e6220364109d6a62b17d2a66ef19ef12a6f4dc368ba1a41142eed7c3",
+      "source_assets": [
+        {
+          "byte_size": 80155135,
+          "etag": null,
+          "license": "HydroBASINS license under the HydroSHEDS terms",
+          "license_url": "https://www.hydrosheds.org/products/hydrobasins",
+          "organization": "WWF HydroSHEDS / HydroBASINS",
+          "product_id": "hybas_as_lev12_v1c",
+          "sha256": "05e98a001fc526cd5fcdbbc8144fe0aa3ce6712c35624f72e4728b219193fdb9",
+          "url": "https://data.hydrosheds.org/file/hydrobasins/standard/hybas_as_lev12_v1c.zip"
+        }
+      ],
+      "storage": "bundle"
+    },
+    {
+      "acquired_on": "2019-08-19",
+      "band": "red",
+      "band_number": "B04",
+      "bounds": [
+        415240.0,
+        3434870.0,
+        455960.0,
+        3481620.0
+      ],
+      "byte_size": 42342174,
+      "crs": "EPSG:32649",
+      "data_type": "float32",
+      "derivation": "Contains modified Copernicus Sentinel data 2019. Range-read watershed crop; reflectance=DN*0.0001+0; SCL classes 0,1,3,8,9,10,11 and pixels outside the watershed set to -9999 nodata.",
+      "logical_id": "before_red",
+      "media_type": "image/tiff; application=geotiff",
+      "nodata": -9999.0,
+      "path": "before_red.tif",
+      "resolution": [
+        10.0,
+        10.0
+      ],
+      "resolution_unit": "metre",
+      "sha256": "815552ea48aca8610b62544b85be8b006e4d25252a3c4fe083853824bf66499f",
+      "source_assets": [
+        {
+          "byte_size": 213701170,
+          "etag": "\"392e85607586145aebe1788773902e85-26\"",
+          "license": "Copernicus Sentinel data legal notice (free, full and open use)",
+          "license_url": "https://sentinels.copernicus.eu/documents/247904/690755/Sentinel_Data_Legal_Notice",
+          "organization": "European Union / ESA Copernicus; Element 84 COG distribution",
+          "product_id": "S2A_MSIL2A_20190819T031541_N0213_R118_T49RDQ_20190819T072545.SAFE/B04",
+          "sha256": "51babf2f7943e7704e8013efe6126ff98342ba9c1db793182de6935c35261f0e",
+          "url": "https://sentinel-cogs.s3.us-west-2.amazonaws.com/sentinel-s2-l2a-cogs/49/R/DQ/2019/8/S2A_49RDQ_20190819_0_L2A/B04.tif"
+        },
+        {
+          "byte_size": 2794209,
+          "etag": "\"14650eb42dd4e0541d9e8e764852f3dc\"",
+          "license": "Copernicus Sentinel data legal notice (free, full and open use)",
+          "license_url": "https://sentinels.copernicus.eu/documents/247904/690755/Sentinel_Data_Legal_Notice",
+          "organization": "European Union / ESA Copernicus; Element 84 COG distribution",
+          "product_id": "S2A_MSIL2A_20190819T031541_N0213_R118_T49RDQ_20190819T072545.SAFE/SCL",
+          "sha256": "b9272530a6682353eab2445187e3da73381c169083e6e3c4df839eac7679a7b4",
+          "url": "https://sentinel-cogs.s3.us-west-2.amazonaws.com/sentinel-s2-l2a-cogs/49/R/DQ/2019/8/S2A_49RDQ_20190819_0_L2A/SCL.tif"
+        }
+      ],
+      "storage": "cache"
+    },
+    {
+      "acquired_on": "2019-08-19",
+      "band": "nir",
+      "band_number": "B08",
+      "bounds": [
+        415240.0,
+        3434870.0,
+        455960.0,
+        3481620.0
+      ],
+      "byte_size": 41472540,
+      "crs": "EPSG:32649",
+      "data_type": "float32",
+      "derivation": "Contains modified Copernicus Sentinel data 2019. Range-read watershed crop; reflectance=DN*0.0001+0; SCL classes 0,1,3,8,9,10,11 and pixels outside the watershed set to -9999 nodata.",
+      "logical_id": "before_nir",
+      "media_type": "image/tiff; application=geotiff",
+      "nodata": -9999.0,
+      "path": "before_nir.tif",
+      "resolution": [
+        10.0,
+        10.0
+      ],
+      "resolution_unit": "metre",
+      "sha256": "d15c4b665c3ea33347dfe78c5b3514e38c37859429c8d488cba07193299ce0c1",
+      "source_assets": [
+        {
+          "byte_size": 251428986,
+          "etag": "\"f42030d96e21d78229197a33f01e945c-30\"",
+          "license": "Copernicus Sentinel data legal notice (free, full and open use)",
+          "license_url": "https://sentinels.copernicus.eu/documents/247904/690755/Sentinel_Data_Legal_Notice",
+          "organization": "European Union / ESA Copernicus; Element 84 COG distribution",
+          "product_id": "S2A_MSIL2A_20190819T031541_N0213_R118_T49RDQ_20190819T072545.SAFE/B08",
+          "sha256": "ec8b233e60328e45e98524b1b50905bccc6ce89b0eeb6120b05885bc3fd3d2fc",
+          "url": "https://sentinel-cogs.s3.us-west-2.amazonaws.com/sentinel-s2-l2a-cogs/49/R/DQ/2019/8/S2A_49RDQ_20190819_0_L2A/B08.tif"
+        },
+        {
+          "byte_size": 2794209,
+          "etag": "\"14650eb42dd4e0541d9e8e764852f3dc\"",
+          "license": "Copernicus Sentinel data legal notice (free, full and open use)",
+          "license_url": "https://sentinels.copernicus.eu/documents/247904/690755/Sentinel_Data_Legal_Notice",
+          "organization": "European Union / ESA Copernicus; Element 84 COG distribution",
+          "product_id": "S2A_MSIL2A_20190819T031541_N0213_R118_T49RDQ_20190819T072545.SAFE/SCL",
+          "sha256": "b9272530a6682353eab2445187e3da73381c169083e6e3c4df839eac7679a7b4",
+          "url": "https://sentinel-cogs.s3.us-west-2.amazonaws.com/sentinel-s2-l2a-cogs/49/R/DQ/2019/8/S2A_49RDQ_20190819_0_L2A/SCL.tif"
+        }
+      ],
+      "storage": "cache"
+    },
+    {
+      "acquired_on": "2024-08-12",
+      "band": "red",
+      "band_number": "B04",
+      "bounds": [
+        415240.0,
+        3434870.0,
+        455960.0,
+        3481620.0
+      ],
+      "byte_size": 40639174,
+      "crs": "EPSG:32649",
+      "data_type": "float32",
+      "derivation": "Contains modified Copernicus Sentinel data 2024. Range-read watershed crop; reflectance=DN*0.0001-0.1; SCL classes 0,1,3,8,9,10,11 and pixels outside the watershed set to -9999 nodata.",
+      "logical_id": "after_red",
+      "media_type": "image/tiff; application=geotiff",
+      "nodata": -9999.0,
+      "path": "after_red.tif",
+      "resolution": [
+        10.0,
+        10.0
+      ],
+      "resolution_unit": "metre",
+      "sha256": "66bc7e4d207b714da252a76902ea39747df9a6539aabaacf73f1fe2ff741ddc2",
+      "source_assets": [
+        {
+          "byte_size": 209096458,
+          "etag": "\"a55dd5415755e8cbe5d6ae47a9b52a93-25\"",
+          "license": "Copernicus Sentinel data legal notice (free, full and open use)",
+          "license_url": "https://sentinels.copernicus.eu/documents/247904/690755/Sentinel_Data_Legal_Notice",
+          "organization": "European Union / ESA Copernicus; Element 84 COG distribution",
+          "product_id": "S2A_MSIL2A_20240812T031521_N0511_R118_T49RDQ_20240812T084251.SAFE/B04",
+          "sha256": "a0ea3cbf8fef6bfa0387acee7e8e5e4658eac30656ab725d97af3adaa255c9a0",
+          "url": "https://sentinel-cogs.s3.us-west-2.amazonaws.com/sentinel-s2-l2a-cogs/49/R/DQ/2024/8/S2A_49RDQ_20240812_0_L2A/B04.tif"
+        },
+        {
+          "byte_size": 1438732,
+          "etag": "\"85926f6837db5c1a67359c4379f4794c\"",
+          "license": "Copernicus Sentinel data legal notice (free, full and open use)",
+          "license_url": "https://sentinels.copernicus.eu/documents/247904/690755/Sentinel_Data_Legal_Notice",
+          "organization": "European Union / ESA Copernicus; Element 84 COG distribution",
+          "product_id": "S2A_MSIL2A_20240812T031521_N0511_R118_T49RDQ_20240812T084251.SAFE/SCL",
+          "sha256": "c42afb6eb470a7dff985a4aedbfeab25809445d91fa8e6f619bf4b29effaf8d0",
+          "url": "https://sentinel-cogs.s3.us-west-2.amazonaws.com/sentinel-s2-l2a-cogs/49/R/DQ/2024/8/S2A_49RDQ_20240812_0_L2A/SCL.tif"
+        }
+      ],
+      "storage": "cache"
+    },
+    {
+      "acquired_on": "2024-08-12",
+      "band": "nir",
+      "band_number": "B08",
+      "bounds": [
+        415240.0,
+        3434870.0,
+        455960.0,
+        3481620.0
+      ],
+      "byte_size": 42175838,
+      "crs": "EPSG:32649",
+      "data_type": "float32",
+      "derivation": "Contains modified Copernicus Sentinel data 2024. Range-read watershed crop; reflectance=DN*0.0001-0.1; SCL classes 0,1,3,8,9,10,11 and pixels outside the watershed set to -9999 nodata.",
+      "logical_id": "after_nir",
+      "media_type": "image/tiff; application=geotiff",
+      "nodata": -9999.0,
+      "path": "after_nir.tif",
+      "resolution": [
+        10.0,
+        10.0
+      ],
+      "resolution_unit": "metre",
+      "sha256": "275d062c884c8ef8c6fdd2b3f63f295ef94675c6888f6db81de3fd1ea566ffe2",
+      "source_assets": [
+        {
+          "byte_size": 253879149,
+          "etag": "\"1cca7fe777e92138567e5d874719d29c-31\"",
+          "license": "Copernicus Sentinel data legal notice (free, full and open use)",
+          "license_url": "https://sentinels.copernicus.eu/documents/247904/690755/Sentinel_Data_Legal_Notice",
+          "organization": "European Union / ESA Copernicus; Element 84 COG distribution",
+          "product_id": "S2A_MSIL2A_20240812T031521_N0511_R118_T49RDQ_20240812T084251.SAFE/B08",
+          "sha256": "d5e1f58bd91e7540b3ca1a327fafad13540735d098ef87cde1319a236a070a76",
+          "url": "https://sentinel-cogs.s3.us-west-2.amazonaws.com/sentinel-s2-l2a-cogs/49/R/DQ/2024/8/S2A_49RDQ_20240812_0_L2A/B08.tif"
+        },
+        {
+          "byte_size": 1438732,
+          "etag": "\"85926f6837db5c1a67359c4379f4794c\"",
+          "license": "Copernicus Sentinel data legal notice (free, full and open use)",
+          "license_url": "https://sentinels.copernicus.eu/documents/247904/690755/Sentinel_Data_Legal_Notice",
+          "organization": "European Union / ESA Copernicus; Element 84 COG distribution",
+          "product_id": "S2A_MSIL2A_20240812T031521_N0511_R118_T49RDQ_20240812T084251.SAFE/SCL",
+          "sha256": "c42afb6eb470a7dff985a4aedbfeab25809445d91fa8e6f619bf4b29effaf8d0",
+          "url": "https://sentinel-cogs.s3.us-west-2.amazonaws.com/sentinel-s2-l2a-cogs/49/R/DQ/2024/8/S2A_49RDQ_20240812_0_L2A/SCL.tif"
+        }
+      ],
+      "storage": "cache"
+    }
+  ],
+  "dataset_name": "Shennongxi dual-date NDVI demonstration",
+  "quality": {
+    "minimum_valid_pixel_ratio": 0.9,
+    "minimum_watershed_coverage_ratio": 0.95
+  },
+  "schema_version": "1.0"
+}

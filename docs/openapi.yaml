@@ -1,0 +1,1708 @@
+openapi: 3.1.0
+info:
+  title: 神农溪分布式多 Agent GIS API
+  summary: Versioned workflow, resource, and internal Agent contracts
+  description: The Master owns workflow routes; Publisher owns read-only tile/download routes. Internal
+    routes are reachable only on the Compose network.
+  version: 1.0.0
+paths:
+  /api/v1/tasks:
+    post:
+      tags:
+      - Master public
+      summary: Create Task
+      description: Accept a Chinese ecological-monitoring request without blocking on analysis.
+      operationId: createTask
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTaskRequest'
+        required: true
+      responses:
+        '202':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskAcceptedResponse'
+        '422':
+          description: Structured error without secret or provider payload fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Structured error without secret or provider payload fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/tasks/{task_id}:
+    get:
+      tags:
+      - Master public
+      summary: Get Task
+      description: Reconstruct durable task, plan, step, error, and artifact state.
+      operationId: getTask
+      parameters:
+      - name: task_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Task Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskResponse'
+        '404':
+          description: Structured error without secret or provider payload fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Structured error without secret or provider payload fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/tasks/{task_id}/events:
+    get:
+      tags:
+      - Master public
+      summary: Stream Task Events
+      operationId: streamTaskEvents
+      parameters:
+      - name: task_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Task Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        '404':
+          description: Structured error without secret or provider payload fields.
+          content:
+            text/event-stream:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Structured error without secret or provider payload fields.
+          content:
+            text/event-stream:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      description: SSE stream. Each event id is the durable monotonic sequence and each data field is
+        one TaskEvent JSON object. Last-Event-ID requests replay.
+  /api/v1/tasks/{task_id}/retry:
+    post:
+      tags:
+      - Master public
+      summary: Retry Task
+      description: Create an immutable new attempt from a validated safe checkpoint.
+      operationId: retryTask
+      parameters:
+      - name: task_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Task Id
+      responses:
+        '202':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RetryAcceptedResponse'
+        '404':
+          description: Structured error without secret or provider payload fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Structured error without secret or provider payload fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Structured error without secret or provider payload fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/health:
+    get:
+      tags:
+      - Master public
+      summary: Get Health
+      operationId: getAggregateHealth
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+  /api/v1/config/readiness:
+    get:
+      tags:
+      - Master public
+      summary: Get Readiness
+      description: Report blockers without returning keys, private URLs, or other secrets.
+      operationId: getConfigurationReadiness
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadinessResponse'
+  /api/v1/tiles/{task_id}/{artifact_type}/{z}/{x}/{y}.png:
+    get:
+      tags:
+      - Publisher resources
+      summary: Get Artifact Tile
+      operationId: getArtifactTile
+      parameters:
+      - name: task_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Task Id
+      - name: artifact_type
+        in: path
+        required: true
+        schema:
+          $ref: '#/components/schemas/TileArtifactType'
+      - name: z
+        in: path
+        required: true
+        schema:
+          type: integer
+          maximum: 24
+          minimum: 0
+          title: Z
+      - name: x
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 0
+          title: X
+      - name: y
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 0
+          title: Y
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            image/png:
+              schema:
+                type: string
+        '404':
+          description: Structured error without secret or provider payload fields.
+          content:
+            image/png:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Structured error without secret or provider payload fields.
+          content:
+            image/png:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Structured error without secret or provider payload fields.
+          content:
+            image/png:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/tasks/{task_id}/artifacts/{artifact_id}/download:
+    get:
+      tags:
+      - Publisher resources
+      summary: Download Artifact
+      operationId: downloadArtifact
+      parameters:
+      - name: task_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Task Id
+      - name: artifact_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Artifact Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+        '404':
+          description: Structured error without secret or provider payload fields.
+          content:
+            application/octet-stream:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Structured error without secret or provider payload fields.
+          content:
+            application/octet-stream:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Structured error without secret or provider payload fields.
+          content:
+            application/octet-stream:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /internal/v1/health:
+    get:
+      tags:
+      - Internal Agent
+      summary: Get Agent Health
+      description: Return local process health on the private Compose network.
+      operationId: getAgentHealth
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceHealth'
+  /internal/v1/data/prepare:
+    post:
+      tags:
+      - Internal Agent
+      summary: Prepare Data
+      operationId: prepareData
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DataPrepareCommand'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DataPrepareResult'
+        '409':
+          description: Structured error without secret or provider payload fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Structured error without secret or provider payload fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Structured error without secret or provider payload fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /internal/v1/analysis/run:
+    post:
+      tags:
+      - Internal Agent
+      summary: Run Analysis
+      operationId: runAnalysis
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AnalysisRunCommand'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisRunResult'
+        '409':
+          description: Structured error without secret or provider payload fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Structured error without secret or provider payload fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Structured error without secret or provider payload fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /internal/v1/quality/evaluate:
+    post:
+      tags:
+      - Internal Agent
+      summary: Evaluate Quality
+      operationId: evaluateQuality
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QualityEvaluateCommand'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QualityEvaluateResult'
+        '409':
+          description: Structured error without secret or provider payload fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Structured error without secret or provider payload fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Structured error without secret or provider payload fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /internal/v1/publisher/publish:
+    post:
+      tags:
+      - Internal Agent
+      summary: Publish Results
+      operationId: publishResults
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PublisherPublishCommand'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublisherPublishResult'
+        '409':
+          description: Structured error without secret or provider payload fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Structured error without secret or provider payload fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Structured error without secret or provider payload fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+components:
+  schemas:
+    AgentName:
+      type: string
+      enum:
+      - master
+      - data
+      - analysis
+      - quality
+      - publisher
+      title: AgentName
+    AnalysisRunCommand:
+      properties:
+        schema_version:
+          type: string
+          const: '1.0'
+          title: Schema Version
+          default: '1.0'
+        task_id:
+          type: string
+          format: uuid
+          title: Task Id
+        step_id:
+          type: string
+          pattern: ^[a-z][a-z0-9_]{0,63}$
+          title: Step Id
+        attempt:
+          type: integer
+          minimum: 1.0
+          title: Attempt
+        correlation_id:
+          type: string
+          format: uuid
+          title: Correlation Id
+        inputs:
+          items:
+            $ref: '#/components/schemas/DataAssetRef'
+          type: array
+          title: Inputs
+      additionalProperties: false
+      type: object
+      required:
+      - task_id
+      - step_id
+      - attempt
+      - correlation_id
+      - inputs
+      title: AnalysisRunCommand
+    AnalysisRunResult:
+      properties:
+        schema_version:
+          type: string
+          const: '1.0'
+          title: Schema Version
+          default: '1.0'
+        task_id:
+          type: string
+          format: uuid
+          title: Task Id
+        step_id:
+          type: string
+          pattern: ^[a-z][a-z0-9_]{0,63}$
+          title: Step Id
+        attempt:
+          type: integer
+          minimum: 1.0
+          title: Attempt
+        correlation_id:
+          type: string
+          format: uuid
+          title: Correlation Id
+        artifacts:
+          items:
+            $ref: '#/components/schemas/ArtifactRef'
+          type: array
+          title: Artifacts
+        statistics:
+          $ref: '#/components/schemas/AreaStatistics'
+      additionalProperties: false
+      type: object
+      required:
+      - task_id
+      - step_id
+      - attempt
+      - correlation_id
+      - artifacts
+      - statistics
+      title: AnalysisRunResult
+    AreaStatistics:
+      properties:
+        schema_version:
+          type: string
+          const: '1.0'
+          title: Schema Version
+          default: '1.0'
+        increase_hectares:
+          type: number
+          minimum: 0.0
+          title: Increase Hectares
+        stable_hectares:
+          type: number
+          minimum: 0.0
+          title: Stable Hectares
+        decrease_hectares:
+          type: number
+          minimum: 0.0
+          title: Decrease Hectares
+        valid_hectares:
+          type: number
+          exclusiveMinimum: 0.0
+          title: Valid Hectares
+      additionalProperties: false
+      type: object
+      required:
+      - increase_hectares
+      - stable_hectares
+      - decrease_hectares
+      - valid_hectares
+      title: AreaStatistics
+    ArtifactRef:
+      properties:
+        schema_version:
+          type: string
+          const: '1.0'
+          title: Schema Version
+          default: '1.0'
+        artifact_id:
+          type: string
+          format: uuid
+          title: Artifact Id
+        task_id:
+          type: string
+          format: uuid
+          title: Task Id
+        attempt:
+          type: integer
+          minimum: 1.0
+          title: Attempt
+        artifact_type:
+          $ref: '#/components/schemas/ArtifactType'
+        status:
+          $ref: '#/components/schemas/ArtifactStatus'
+        media_type:
+          type: string
+          maxLength: 200
+          minLength: 1
+          title: Media Type
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        checksum_sha256:
+          anyOf:
+          - type: string
+            pattern: ^[0-9a-f]{64}$
+          - type: 'null'
+          title: Checksum Sha256
+        byte_size:
+          anyOf:
+          - type: integer
+            exclusiveMinimum: 0.0
+          - type: 'null'
+          title: Byte Size
+      additionalProperties: false
+      type: object
+      required:
+      - artifact_id
+      - task_id
+      - attempt
+      - artifact_type
+      - status
+      - media_type
+      - created_at
+      title: ArtifactRef
+    ArtifactStatus:
+      type: string
+      enum:
+      - STAGING
+      - COMPLETE
+      - FAILED
+      title: ArtifactStatus
+    ArtifactType:
+      type: string
+      enum:
+      - DATA_MANIFEST
+      - WATERSHED_BOUNDARY
+      - NDVI_BEFORE
+      - NDVI_AFTER
+      - NDVI_DIFFERENCE
+      - CHANGE_CLASSIFICATION
+      - AREA_STATISTICS
+      - QUALITY_REPORT
+      - PDF_REPORT
+      title: ArtifactType
+    CreateTaskRequest:
+      properties:
+        schema_version:
+          type: string
+          const: '1.0'
+          title: Schema Version
+          default: '1.0'
+        query:
+          type: string
+          maxLength: 2000
+          minLength: 1
+          title: Query
+      additionalProperties: false
+      type: object
+      required:
+      - query
+      title: CreateTaskRequest
+    DataAssetRef:
+      properties:
+        schema_version:
+          type: string
+          const: '1.0'
+          title: Schema Version
+          default: '1.0'
+        dataset_id:
+          $ref: '#/components/schemas/LogicalDatasetId'
+        checksum_sha256:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+          title: Checksum Sha256
+        byte_size:
+          type: integer
+          exclusiveMinimum: 0.0
+          title: Byte Size
+        grid:
+          anyOf:
+          - $ref: '#/components/schemas/RasterGrid'
+          - type: 'null'
+        acquired_on:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: Acquired On
+      additionalProperties: false
+      type: object
+      required:
+      - dataset_id
+      - checksum_sha256
+      - byte_size
+      title: DataAssetRef
+    DataPrepareCommand:
+      properties:
+        schema_version:
+          type: string
+          const: '1.0'
+          title: Schema Version
+          default: '1.0'
+        task_id:
+          type: string
+          format: uuid
+          title: Task Id
+        step_id:
+          type: string
+          pattern: ^[a-z][a-z0-9_]{0,63}$
+          title: Step Id
+        attempt:
+          type: integer
+          minimum: 1.0
+          title: Attempt
+        correlation_id:
+          type: string
+          format: uuid
+          title: Correlation Id
+        dataset_ids:
+          items:
+            $ref: '#/components/schemas/LogicalDatasetId'
+          type: array
+          title: Dataset Ids
+      additionalProperties: false
+      type: object
+      required:
+      - task_id
+      - step_id
+      - attempt
+      - correlation_id
+      - dataset_ids
+      title: DataPrepareCommand
+    DataPrepareResult:
+      properties:
+        schema_version:
+          type: string
+          const: '1.0'
+          title: Schema Version
+          default: '1.0'
+        task_id:
+          type: string
+          format: uuid
+          title: Task Id
+        step_id:
+          type: string
+          pattern: ^[a-z][a-z0-9_]{0,63}$
+          title: Step Id
+        attempt:
+          type: integer
+          minimum: 1.0
+          title: Attempt
+        correlation_id:
+          type: string
+          format: uuid
+          title: Correlation Id
+        assets:
+          items:
+            $ref: '#/components/schemas/DataAssetRef'
+          type: array
+          title: Assets
+      additionalProperties: false
+      type: object
+      required:
+      - task_id
+      - step_id
+      - attempt
+      - correlation_id
+      - assets
+      title: DataPrepareResult
+    ErrorCode:
+      type: string
+      enum:
+      - VALIDATION_ERROR
+      - INVALID_PLAN
+      - TRANSITION_NOT_ALLOWED
+      - TASK_NOT_FOUND
+      - CONFLICT
+      - DEPENDENCY_UNAVAILABLE
+      - DATA_INVALID
+      - ANALYSIS_FAILED
+      - QUALITY_FAILED
+      - PUBLISHING_FAILED
+      - INTERNAL_ERROR
+      title: ErrorCode
+    ErrorDetail:
+      properties:
+        schema_version:
+          type: string
+          const: '1.0'
+          title: Schema Version
+          default: '1.0'
+        field:
+          anyOf:
+          - type: string
+            maxLength: 200
+            minLength: 1
+          - type: 'null'
+          title: Field
+        reason:
+          type: string
+          maxLength: 2000
+          minLength: 1
+          title: Reason
+      additionalProperties: false
+      type: object
+      required:
+      - reason
+      title: ErrorDetail
+    ErrorResponse:
+      properties:
+        schema_version:
+          type: string
+          const: '1.0'
+          title: Schema Version
+          default: '1.0'
+        error:
+          $ref: '#/components/schemas/StructuredError'
+      additionalProperties: false
+      type: object
+      required:
+      - error
+      title: ErrorResponse
+    ExecutionPlan:
+      properties:
+        schema_version:
+          type: string
+          const: '1.0'
+          title: Schema Version
+          default: '1.0'
+        plan_id:
+          type: string
+          format: uuid
+          title: Plan Id
+        task_id:
+          type: string
+          format: uuid
+          title: Task Id
+        source:
+          $ref: '#/components/schemas/PlanSource'
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        model_call:
+          anyOf:
+          - $ref: '#/components/schemas/ModelCallRecord'
+          - type: 'null'
+        steps:
+          items:
+            $ref: '#/components/schemas/PlanStep'
+          type: array
+          title: Steps
+      additionalProperties: false
+      type: object
+      required:
+      - plan_id
+      - task_id
+      - source
+      - created_at
+      - steps
+      title: ExecutionPlan
+    HealthResponse:
+      properties:
+        schema_version:
+          type: string
+          const: '1.0'
+          title: Schema Version
+          default: '1.0'
+        state:
+          $ref: '#/components/schemas/HealthState'
+        checked_at:
+          type: string
+          format: date-time
+          title: Checked At
+        services:
+          items:
+            $ref: '#/components/schemas/ServiceHealth'
+          type: array
+          title: Services
+      additionalProperties: false
+      type: object
+      required:
+      - state
+      - checked_at
+      - services
+      title: HealthResponse
+    HealthState:
+      type: string
+      enum:
+      - HEALTHY
+      - DEGRADED
+      - UNAVAILABLE
+      title: HealthState
+    LogicalDatasetId:
+      type: string
+      enum:
+      - watershed
+      - before_red
+      - before_nir
+      - after_red
+      - after_nir
+      title: LogicalDatasetId
+    ModelCallRecord:
+      properties:
+        schema_version:
+          type: string
+          const: '1.0'
+          title: Schema Version
+          default: '1.0'
+        model:
+          type: string
+          maxLength: 200
+          minLength: 1
+          title: Model
+        started_at:
+          type: string
+          format: date-time
+          title: Started At
+        duration_ms:
+          type: integer
+          minimum: 0.0
+          title: Duration Ms
+        status:
+          $ref: '#/components/schemas/ModelCallStatus'
+        input_tokens:
+          anyOf:
+          - type: integer
+            minimum: 0.0
+          - type: 'null'
+          title: Input Tokens
+        output_tokens:
+          anyOf:
+          - type: integer
+            minimum: 0.0
+          - type: 'null'
+          title: Output Tokens
+        response_sha256:
+          anyOf:
+          - type: string
+            pattern: ^[0-9a-f]{64}$
+          - type: 'null'
+          title: Response Sha256
+        error_code:
+          anyOf:
+          - type: string
+            maxLength: 200
+            minLength: 1
+          - type: 'null'
+          title: Error Code
+      additionalProperties: false
+      type: object
+      required:
+      - model
+      - started_at
+      - duration_ms
+      - status
+      title: ModelCallRecord
+    ModelCallStatus:
+      type: string
+      enum:
+      - SUCCEEDED
+      - FAILED
+      title: ModelCallStatus
+    PlanSource:
+      type: string
+      enum:
+      - REAL_LLM
+      - BUILTIN_RECOVERY
+      title: PlanSource
+    PlanStep:
+      properties:
+        schema_version:
+          type: string
+          const: '1.0'
+          title: Schema Version
+          default: '1.0'
+        step_id:
+          type: string
+          pattern: ^[a-z][a-z0-9_]{0,63}$
+          title: Step Id
+        kind:
+          $ref: '#/components/schemas/PlanStepKind'
+        agent:
+          $ref: '#/components/schemas/AgentName'
+        order:
+          type: integer
+          maximum: 4.0
+          minimum: 1.0
+          title: Order
+        title:
+          type: string
+          maxLength: 200
+          minLength: 1
+          title: Title
+        depends_on:
+          items:
+            type: string
+            pattern: ^[a-z][a-z0-9_]{0,63}$
+          type: array
+          title: Depends On
+          default: []
+      additionalProperties: false
+      type: object
+      required:
+      - step_id
+      - kind
+      - agent
+      - order
+      - title
+      title: PlanStep
+    PlanStepKind:
+      type: string
+      enum:
+      - prepare_data
+      - analyze_ndvi_change
+      - evaluate_quality
+      - publish_results
+      title: PlanStepKind
+    PublishedResource:
+      properties:
+        schema_version:
+          type: string
+          const: '1.0'
+          title: Schema Version
+          default: '1.0'
+        artifact_id:
+          type: string
+          format: uuid
+          title: Artifact Id
+        tile_template:
+          anyOf:
+          - type: string
+            maxLength: 200
+            minLength: 1
+          - type: 'null'
+          title: Tile Template
+        download_path:
+          anyOf:
+          - type: string
+            maxLength: 200
+            minLength: 1
+          - type: 'null'
+          title: Download Path
+      additionalProperties: false
+      type: object
+      required:
+      - artifact_id
+      title: PublishedResource
+    PublisherPublishCommand:
+      properties:
+        schema_version:
+          type: string
+          const: '1.0'
+          title: Schema Version
+          default: '1.0'
+        task_id:
+          type: string
+          format: uuid
+          title: Task Id
+        step_id:
+          type: string
+          pattern: ^[a-z][a-z0-9_]{0,63}$
+          title: Step Id
+        attempt:
+          type: integer
+          minimum: 1.0
+          title: Attempt
+        correlation_id:
+          type: string
+          format: uuid
+          title: Correlation Id
+        artifacts:
+          items:
+            $ref: '#/components/schemas/ArtifactRef'
+          type: array
+          title: Artifacts
+        quality:
+          $ref: '#/components/schemas/QualityMetrics'
+      additionalProperties: false
+      type: object
+      required:
+      - task_id
+      - step_id
+      - attempt
+      - correlation_id
+      - artifacts
+      - quality
+      title: PublisherPublishCommand
+    PublisherPublishResult:
+      properties:
+        schema_version:
+          type: string
+          const: '1.0'
+          title: Schema Version
+          default: '1.0'
+        task_id:
+          type: string
+          format: uuid
+          title: Task Id
+        step_id:
+          type: string
+          pattern: ^[a-z][a-z0-9_]{0,63}$
+          title: Step Id
+        attempt:
+          type: integer
+          minimum: 1.0
+          title: Attempt
+        correlation_id:
+          type: string
+          format: uuid
+          title: Correlation Id
+        resources:
+          items:
+            $ref: '#/components/schemas/PublishedResource'
+          type: array
+          title: Resources
+        report:
+          $ref: '#/components/schemas/ArtifactRef'
+      additionalProperties: false
+      type: object
+      required:
+      - task_id
+      - step_id
+      - attempt
+      - correlation_id
+      - resources
+      - report
+      title: PublisherPublishResult
+    QualityEvaluateCommand:
+      properties:
+        schema_version:
+          type: string
+          const: '1.0'
+          title: Schema Version
+          default: '1.0'
+        task_id:
+          type: string
+          format: uuid
+          title: Task Id
+        step_id:
+          type: string
+          pattern: ^[a-z][a-z0-9_]{0,63}$
+          title: Step Id
+        attempt:
+          type: integer
+          minimum: 1.0
+          title: Attempt
+        correlation_id:
+          type: string
+          format: uuid
+          title: Correlation Id
+        artifacts:
+          items:
+            $ref: '#/components/schemas/ArtifactRef'
+          type: array
+          title: Artifacts
+        analysis_elapsed_ms:
+          type: integer
+          minimum: 0.0
+          title: Analysis Elapsed Ms
+      additionalProperties: false
+      type: object
+      required:
+      - task_id
+      - step_id
+      - attempt
+      - correlation_id
+      - artifacts
+      - analysis_elapsed_ms
+      title: QualityEvaluateCommand
+    QualityEvaluateResult:
+      properties:
+        schema_version:
+          type: string
+          const: '1.0'
+          title: Schema Version
+          default: '1.0'
+        task_id:
+          type: string
+          format: uuid
+          title: Task Id
+        step_id:
+          type: string
+          pattern: ^[a-z][a-z0-9_]{0,63}$
+          title: Step Id
+        attempt:
+          type: integer
+          minimum: 1.0
+          title: Attempt
+        correlation_id:
+          type: string
+          format: uuid
+          title: Correlation Id
+        metrics:
+          $ref: '#/components/schemas/QualityMetrics'
+        artifact:
+          $ref: '#/components/schemas/ArtifactRef'
+      additionalProperties: false
+      type: object
+      required:
+      - task_id
+      - step_id
+      - attempt
+      - correlation_id
+      - metrics
+      - artifact
+      title: QualityEvaluateResult
+    QualityMetrics:
+      properties:
+        schema_version:
+          type: string
+          const: '1.0'
+          title: Schema Version
+          default: '1.0'
+        coverage_ratio:
+          type: number
+          maximum: 1.0
+          minimum: 0.0
+          title: Coverage Ratio
+        valid_pixel_ratio:
+          type: number
+          maximum: 1.0
+          minimum: 0.0
+          title: Valid Pixel Ratio
+        output_complete:
+          type: boolean
+          title: Output Complete
+        elapsed_ms:
+          type: integer
+          minimum: 0.0
+          title: Elapsed Ms
+        passed:
+          type: boolean
+          title: Passed
+        evidence:
+          items:
+            type: string
+            maxLength: 200
+            minLength: 1
+          type: array
+          title: Evidence
+          default: []
+      additionalProperties: false
+      type: object
+      required:
+      - coverage_ratio
+      - valid_pixel_ratio
+      - output_complete
+      - elapsed_ms
+      - passed
+      title: QualityMetrics
+    RasterGrid:
+      properties:
+        schema_version:
+          type: string
+          const: '1.0'
+          title: Schema Version
+          default: '1.0'
+        crs:
+          type: string
+          maxLength: 200
+          minLength: 1
+          title: Crs
+        width:
+          type: integer
+          minimum: 1.0
+          title: Width
+        height:
+          type: integer
+          minimum: 1.0
+          title: Height
+        transform:
+          prefixItems:
+          - type: number
+          - type: number
+          - type: number
+          - type: number
+          - type: number
+          - type: number
+          type: array
+          maxItems: 6
+          minItems: 6
+          title: Transform
+        bounds:
+          prefixItems:
+          - type: number
+          - type: number
+          - type: number
+          - type: number
+          type: array
+          maxItems: 4
+          minItems: 4
+          title: Bounds
+      additionalProperties: false
+      type: object
+      required:
+      - crs
+      - width
+      - height
+      - transform
+      - bounds
+      title: RasterGrid
+    ReadinessBlocker:
+      type: string
+      enum:
+      - LLM_NOT_CONFIGURED
+      - DATA_NOT_CONFIGURED
+      - DEPENDENCY_UNAVAILABLE
+      title: ReadinessBlocker
+    ReadinessResponse:
+      properties:
+        schema_version:
+          type: string
+          const: '1.0'
+          title: Schema Version
+          default: '1.0'
+        ready:
+          type: boolean
+          title: Ready
+        llm_configured:
+          type: boolean
+          title: Llm Configured
+        data_configured:
+          type: boolean
+          title: Data Configured
+        blockers:
+          items:
+            $ref: '#/components/schemas/ReadinessBlocker'
+          type: array
+          title: Blockers
+          default: []
+        messages:
+          items:
+            type: string
+            maxLength: 2000
+            minLength: 1
+          type: array
+          title: Messages
+          default: []
+      additionalProperties: false
+      type: object
+      required:
+      - ready
+      - llm_configured
+      - data_configured
+      title: ReadinessResponse
+    RetryAcceptedResponse:
+      properties:
+        schema_version:
+          type: string
+          const: '1.0'
+          title: Schema Version
+          default: '1.0'
+        task_id:
+          type: string
+          format: uuid
+          title: Task Id
+        attempt:
+          type: integer
+          minimum: 2.0
+          title: Attempt
+        status:
+          $ref: '#/components/schemas/TaskStatus'
+        accepted_at:
+          type: string
+          format: date-time
+          title: Accepted At
+      additionalProperties: false
+      type: object
+      required:
+      - task_id
+      - attempt
+      - status
+      - accepted_at
+      title: RetryAcceptedResponse
+    ServiceHealth:
+      properties:
+        schema_version:
+          type: string
+          const: '1.0'
+          title: Schema Version
+          default: '1.0'
+        service:
+          $ref: '#/components/schemas/ServiceName'
+        state:
+          $ref: '#/components/schemas/HealthState'
+        checked_at:
+          type: string
+          format: date-time
+          title: Checked At
+        message:
+          anyOf:
+          - type: string
+            maxLength: 200
+            minLength: 1
+          - type: 'null'
+          title: Message
+      additionalProperties: false
+      type: object
+      required:
+      - service
+      - state
+      - checked_at
+      title: ServiceHealth
+    ServiceName:
+      type: string
+      enum:
+      - master
+      - data
+      - analysis
+      - quality
+      - publisher
+      - postgis
+      - redis
+      title: ServiceName
+    StepStatus:
+      type: string
+      enum:
+      - PENDING
+      - RUNNING
+      - COMPLETED
+      - FAILED
+      - SKIPPED
+      title: StepStatus
+    StructuredError:
+      properties:
+        schema_version:
+          type: string
+          const: '1.0'
+          title: Schema Version
+          default: '1.0'
+        code:
+          $ref: '#/components/schemas/ErrorCode'
+        message:
+          type: string
+          maxLength: 2000
+          minLength: 1
+          title: Message
+        retryable:
+          type: boolean
+          title: Retryable
+        details:
+          items:
+            $ref: '#/components/schemas/ErrorDetail'
+          type: array
+          title: Details
+          default: []
+      additionalProperties: false
+      type: object
+      required:
+      - code
+      - message
+      - retryable
+      title: StructuredError
+    TaskAcceptedResponse:
+      properties:
+        schema_version:
+          type: string
+          const: '1.0'
+          title: Schema Version
+          default: '1.0'
+        task_id:
+          type: string
+          format: uuid
+          title: Task Id
+        status:
+          $ref: '#/components/schemas/TaskStatus'
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+      additionalProperties: false
+      type: object
+      required:
+      - task_id
+      - status
+      - created_at
+      title: TaskAcceptedResponse
+    TaskEvent:
+      properties:
+        schema_version:
+          type: string
+          const: '1.0'
+          title: Schema Version
+          default: '1.0'
+        sequence:
+          type: integer
+          minimum: 1.0
+          title: Sequence
+        task_id:
+          type: string
+          format: uuid
+          title: Task Id
+        step_id:
+          type: string
+          pattern: ^[a-z][a-z0-9_]{0,63}$
+          title: Step Id
+        attempt:
+          type: integer
+          minimum: 1.0
+          title: Attempt
+        correlation_id:
+          type: string
+          format: uuid
+          title: Correlation Id
+        agent:
+          $ref: '#/components/schemas/AgentName'
+        status:
+          $ref: '#/components/schemas/TaskStatus'
+        progress:
+          type: integer
+          maximum: 100.0
+          minimum: 0.0
+          title: Progress
+        message:
+          type: string
+          maxLength: 2000
+          minLength: 1
+          title: Message
+        elapsed_ms:
+          type: integer
+          minimum: 0.0
+          title: Elapsed Ms
+        occurred_at:
+          type: string
+          format: date-time
+          title: Occurred At
+        error:
+          anyOf:
+          - $ref: '#/components/schemas/StructuredError'
+          - type: 'null'
+        artifacts:
+          items:
+            $ref: '#/components/schemas/ArtifactRef'
+          type: array
+          title: Artifacts
+          default: []
+      additionalProperties: false
+      type: object
+      required:
+      - sequence
+      - task_id
+      - step_id
+      - attempt
+      - correlation_id
+      - agent
+      - status
+      - progress
+      - message
+      - elapsed_ms
+      - occurred_at
+      title: TaskEvent
+    TaskResponse:
+      properties:
+        schema_version:
+          type: string
+          const: '1.0'
+          title: Schema Version
+          default: '1.0'
+        task_id:
+          type: string
+          format: uuid
+          title: Task Id
+        query:
+          type: string
+          maxLength: 2000
+          minLength: 1
+          title: Query
+        status:
+          $ref: '#/components/schemas/TaskStatus'
+        progress:
+          type: integer
+          maximum: 100.0
+          minimum: 0.0
+          title: Progress
+        current_attempt:
+          type: integer
+          minimum: 1.0
+          title: Current Attempt
+        correlation_id:
+          type: string
+          format: uuid
+          title: Correlation Id
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        plan:
+          anyOf:
+          - $ref: '#/components/schemas/ExecutionPlan'
+          - type: 'null'
+        steps:
+          items:
+            $ref: '#/components/schemas/TaskStep'
+          type: array
+          title: Steps
+          default: []
+        artifacts:
+          items:
+            $ref: '#/components/schemas/ArtifactRef'
+          type: array
+          title: Artifacts
+          default: []
+        last_error:
+          anyOf:
+          - $ref: '#/components/schemas/StructuredError'
+          - type: 'null'
+      additionalProperties: false
+      type: object
+      required:
+      - task_id
+      - query
+      - status
+      - progress
+      - current_attempt
+      - correlation_id
+      - created_at
+      - updated_at
+      title: TaskResponse
+    TaskStatus:
+      type: string
+      enum:
+      - PENDING
+      - PLANNING
+      - DATA_PREPARING
+      - ANALYZING
+      - QUALITY_CHECKING
+      - PUBLISHING
+      - COMPLETED
+      - FAILED
+      title: TaskStatus
+      description: Durable workflow states exposed by the public API.
+    TaskStep:
+      properties:
+        schema_version:
+          type: string
+          const: '1.0'
+          title: Schema Version
+          default: '1.0'
+        step_id:
+          type: string
+          pattern: ^[a-z][a-z0-9_]{0,63}$
+          title: Step Id
+        kind:
+          $ref: '#/components/schemas/PlanStepKind'
+        agent:
+          $ref: '#/components/schemas/AgentName'
+        attempt:
+          type: integer
+          minimum: 1.0
+          title: Attempt
+        status:
+          $ref: '#/components/schemas/StepStatus'
+        progress:
+          type: integer
+          maximum: 100.0
+          minimum: 0.0
+          title: Progress
+        started_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Started At
+        completed_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Completed At
+        elapsed_ms:
+          anyOf:
+          - type: integer
+            minimum: 0.0
+          - type: 'null'
+          title: Elapsed Ms
+        error:
+          anyOf:
+          - $ref: '#/components/schemas/StructuredError'
+          - type: 'null'
+        artifacts:
+          items:
+            $ref: '#/components/schemas/ArtifactRef'
+          type: array
+          title: Artifacts
+          default: []
+      additionalProperties: false
+      type: object
+      required:
+      - step_id
+      - kind
+      - agent
+      - attempt
+      - status
+      - progress
+      title: TaskStep
+    TileArtifactType:
+      type: string
+      enum:
+      - NDVI_BEFORE
+      - NDVI_AFTER
+      - NDVI_DIFFERENCE
+      - CHANGE_CLASSIFICATION
+      title: TileArtifactType

@@ -1,0 +1,269 @@
+name: hennongxi
+
+x-agent-base: &agent-base
+  image: hennongxi/backend:0.1.0
+  build:
+    context: .
+    dockerfile: infra/docker/backend.Dockerfile
+  platform: ${TARGET_PLATFORM:-linux/arm64}
+  restart: unless-stopped
+  init: true
+  read_only: true
+  tmpfs:
+    - /tmp
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  healthcheck:
+    test:
+      - CMD
+      - python
+      - -c
+      - >-
+        import os, urllib.request;
+        urllib.request.urlopen(os.environ['HEALTHCHECK_URL'], timeout=2)
+    interval: 10s
+    timeout: 3s
+    retries: 5
+    start_period: 10s
+
+x-common-agent-environment: &common-agent-environment
+  APP_ENV: ${APP_ENV:-development}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://hennongxi:local-development-only@postgis:5432/hennongxi}
+  REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+
+services:
+  web:
+    image: hennongxi/web:0.1.0
+    build:
+      context: apps/web
+      dockerfile: Dockerfile
+    platform: ${TARGET_PLATFORM:-linux/arm64}
+    restart: unless-stopped
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      VITE_MASTER_BASE_URL: ${PUBLIC_MASTER_BASE_URL:-http://localhost:8000}
+      VITE_PUBLISHER_BASE_URL: ${PUBLIC_PUBLISHER_BASE_URL:-http://localhost:8004}
+    command: ["pnpm", "exec", "vite", "--host", "0.0.0.0", "--port", "3000"]
+    ports:
+      - "127.0.0.1:3000:3000"
+    networks:
+      - public
+    depends_on:
+      master-agent:
+        condition: service_healthy
+      publisher-agent:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          fetch('http://127.0.0.1:3000/', {signal: AbortSignal.timeout(2000)})
+          .then(response => process.exit(response.ok ? 0 : 1))
+          .catch(() => process.exit(1))
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  master-agent:
+    <<: *agent-base
+    command:
+      - uvicorn
+      - hennongxi_master.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --no-access-log
+    environment:
+      <<: *common-agent-environment
+      HEALTHCHECK_URL: http://127.0.0.1:8000/internal/v1/health
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+      LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-30}
+      DATA_AGENT_BASE_URL: ${DATA_AGENT_BASE_URL:-http://data-agent:8001}
+      ANALYSIS_AGENT_BASE_URL: ${ANALYSIS_AGENT_BASE_URL:-http://analysis-agent:8002}
+      QUALITY_AGENT_BASE_URL: ${QUALITY_AGENT_BASE_URL:-http://quality-agent:8003}
+      PUBLISHER_AGENT_BASE_URL: ${PUBLISHER_AGENT_BASE_URL:-http://publisher-agent:8004}
+    ports:
+      - "127.0.0.1:8000:8000"
+    networks:
+      - public
+      - private
+    depends_on:
+      data-agent:
+        condition: service_healthy
+      analysis-agent:
+        condition: service_healthy
+      quality-agent:
+        condition: service_healthy
+      publisher-agent:
+        condition: service_healthy
+      postgis:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  data-agent:
+    <<: *agent-base
+    command:
+      - uvicorn
+      - hennongxi_data_agent.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8001"
+      - --no-access-log
+    environment:
+      <<: *common-agent-environment
+      HEALTHCHECK_URL: http://127.0.0.1:8001/internal/v1/health
+      DATA_MANIFEST_PATH: ${DATA_MANIFEST_PATH:-/app/data/manifest.json}
+      DATA_CACHE_DIR: ${DATA_CACHE_DIR:-/data/cache}
+    networks:
+      - private
+    volumes:
+      - type: volume
+        source: data-cache
+        target: /data/cache
+
+  analysis-agent:
+    <<: *agent-base
+    command:
+      - uvicorn
+      - hennongxi_analysis_agent.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8002"
+      - --no-access-log
+    environment:
+      <<: *common-agent-environment
+      HEALTHCHECK_URL: http://127.0.0.1:8002/internal/v1/health
+      DATA_CACHE_DIR: ${DATA_CACHE_DIR:-/data/cache}
+      ARTIFACT_ROOT: ${ARTIFACT_ROOT:-/data/outputs}
+    networks:
+      - private
+    volumes:
+      - type: volume
+        source: data-cache
+        target: /data/cache
+        read_only: true
+      - type: volume
+        source: artifacts
+        target: /data/outputs
+
+  quality-agent:
+    <<: *agent-base
+    command:
+      - uvicorn
+      - hennongxi_quality_agent.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8003"
+      - --no-access-log
+    environment:
+      <<: *common-agent-environment
+      HEALTHCHECK_URL: http://127.0.0.1:8003/internal/v1/health
+      ARTIFACT_ROOT: ${ARTIFACT_ROOT:-/data/outputs}
+    networks:
+      - private
+    volumes:
+      - type: volume
+        source: artifacts
+        target: /data/outputs
+        read_only: true
+
+  publisher-agent:
+    <<: *agent-base
+    command:
+      - uvicorn
+      - hennongxi_publisher_agent.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8004"
+      - --no-access-log
+    environment:
+      <<: *common-agent-environment
+      HEALTHCHECK_URL: http://127.0.0.1:8004/internal/v1/health
+      ARTIFACT_ROOT: ${ARTIFACT_ROOT:-/data/outputs}
+    ports:
+      - "127.0.0.1:8004:8004"
+    networks:
+      - public
+      - private
+    volumes:
+      - type: volume
+        source: artifacts
+        target: /data/outputs
+
+  postgis:
+    image: hennongxi/postgis:17-3.6.4
+    build:
+      context: infra/db/postgis
+      dockerfile: Dockerfile
+      args:
+        POSTGIS_PACKAGE_VERSION: ${POSTGIS_PACKAGE_VERSION:-3.6.4+dfsg-2.pgdg12+1}
+    platform: ${TARGET_PLATFORM:-linux/arm64}
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-hennongxi}
+      POSTGRES_USER: ${POSTGRES_USER:-hennongxi}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local-development-only}
+    networks:
+      - private
+    volumes:
+      - type: volume
+        source: postgres-data
+        target: /var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"
+          && psql -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"
+          -tAc 'SELECT PostGIS_Version()' >/dev/null
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  redis:
+    image: redis:8.8.0-alpine
+    platform: ${TARGET_PLATFORM:-linux/arm64}
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    networks:
+      - private
+    volumes:
+      - type: volume
+        source: redis-data
+        target: /data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+networks:
+  public:
+    driver: bridge
+  private:
+    driver: bridge
+    internal: true
+
+volumes:
+  postgres-data:
+  redis-data:
+  data-cache:
+  artifacts:

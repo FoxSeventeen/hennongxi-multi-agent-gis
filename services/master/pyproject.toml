@@ -1,0 +1,23 @@
+[project]
+name = "hennongxi-master"
+version = "0.1.0"
+description = "Master Agent service"
+requires-python = "==3.12.*"
+dependencies = [
+  "asyncpg==0.31.0",
+  "fastapi==0.139.2",
+  "hennongxi-contracts",
+  "hennongxi-observability",
+  "httpx==0.28.1",
+  "redis==8.0.1",
+  "sqlalchemy==2.0.51",
+  "uvicorn[standard]==0.51.0",
+]
+
+[tool.uv.sources]
+hennongxi-contracts = { workspace = true }
+hennongxi-observability = { workspace = true }
+
+[build-system]
+requires = ["uv-build==0.11.29"]
+build-backend = "uv_build"
