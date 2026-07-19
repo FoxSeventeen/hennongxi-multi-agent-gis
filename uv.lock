@@ -335,16 +335,26 @@ version = "0.1.0"
 source = { editable = "services/data_agent" }
 dependencies = [
     { name = "fastapi" },
+    { name = "geopandas" },
     { name = "hennongxi-contracts" },
     { name = "hennongxi-observability" },
+    { name = "numpy" },
+    { name = "pydantic" },
+    { name = "rasterio" },
+    { name = "shapely" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "fastapi", specifier = "==0.139.2" },
+    { name = "geopandas", specifier = "==1.1.4" },
     { name = "hennongxi-contracts", editable = "packages/contracts" },
     { name = "hennongxi-observability", editable = "packages/observability" },
+    { name = "numpy", specifier = "==2.5.1" },
+    { name = "pydantic", specifier = "==2.13.4" },
+    { name = "rasterio", specifier = "==1.5.0" },
+    { name = "shapely", specifier = "==2.1.2" },
     { name = "uvicorn", extras = ["standard"], specifier = "==0.51.0" },
 ]
 
