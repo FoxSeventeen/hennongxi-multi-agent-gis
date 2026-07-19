@@ -7,6 +7,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 import rasterio
+from hennongxi_contracts import LogicalDatasetId
 from rasterio.transform import from_origin
 
 from scripts.data_preflight import ManifestValidationError, load_manifest, run_preflight
@@ -175,6 +176,17 @@ def test_preflight_verifies_checksums_metadata_grids_and_coverage(tmp_path: Path
     assert report.ok, report.format()
     assert report.valid_pixel_ratios.keys() == set(RASTER_IDS)
     assert all(value == pytest.approx(1.0) for value in report.valid_pixel_ratios.values())
+    assert tuple(asset.dataset_id for asset in report.assets) == tuple(LogicalDatasetId)
+    assert report.assets[0].grid is None
+    for asset in report.assets[1:]:
+        assert asset.grid is not None
+        assert asset.grid.crs == "EPSG:4326"
+        assert asset.grid.width == 10
+        assert asset.grid.height == 10
+        assert asset.grid.bounds == pytest.approx((110.0, 31.0, 110.1, 31.1))
+        assert asset.grid.nodata == 0
+        assert asset.acquired_on is not None
+        assert "path" not in asset.model_dump()
 
 
 def test_preflight_reports_generic_remediation_without_source_url(tmp_path: Path) -> None:
@@ -188,6 +200,7 @@ def test_preflight_reports_generic_remediation_without_source_url(tmp_path: Path
     assert "before_red" in rendered
     assert "python scripts/cache_demo_data.py" in rendered
     assert "https://example.test" not in rendered
+    assert report.assets == ()
 
 
 def test_preflight_rejects_under_covering_raster_even_with_valid_checksum(

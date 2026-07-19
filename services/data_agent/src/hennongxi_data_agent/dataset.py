@@ -14,7 +14,11 @@ from typing import Annotated, Literal, Self
 import geopandas as gpd  # type: ignore[import-untyped]
 import numpy as np
 import rasterio  # type: ignore[import-untyped]
-from hennongxi_contracts import LogicalDatasetId  # type: ignore[import-untyped]
+from hennongxi_contracts import (  # type: ignore[import-untyped]
+    DataAssetRef,
+    LogicalDatasetId,
+    RasterGrid,
+)
 from pydantic import (
     AnyHttpUrl,
     BaseModel,
@@ -189,6 +193,7 @@ class PreflightCheck:
 class PreflightReport:
     checks: list[PreflightCheck] = field(default_factory=list)
     valid_pixel_ratios: dict[str, float] = field(default_factory=dict)
+    assets: tuple[DataAssetRef, ...] = ()
 
     @property
     def ok(self) -> bool:
@@ -213,6 +218,7 @@ class PreflightReport:
 class RasterInspection:
     fingerprint: tuple[str, int, int, tuple[float, ...]]
     valid_ratio: float
+    grid: RasterGrid
 
 
 def load_manifest(path: Path) -> DatasetManifest:
@@ -325,7 +331,7 @@ def _inspect_raster(
                 if metadata_ok
                 else "raster metadata does not match manifest",
             )
-            if not metadata_ok or dataset.crs is None:
+            if not metadata_ok or dataset.crs is None or dataset.nodata is None:
                 return None
 
             projected = boundary.to_crs(dataset.crs)
@@ -370,13 +376,29 @@ def _inspect_raster(
                 valid_ok,
                 f"valid watershed pixel ratio {valid_ratio:.4f}",
             )
-            fingerprint = (
-                dataset.crs.to_string(),
-                dataset.width,
-                dataset.height,
-                tuple(float(value) for value in dataset.transform),
+            transform = (
+                float(dataset.transform.a),
+                float(dataset.transform.b),
+                float(dataset.transform.c),
+                float(dataset.transform.d),
+                float(dataset.transform.e),
+                float(dataset.transform.f),
             )
-            return RasterInspection(fingerprint=fingerprint, valid_ratio=valid_ratio)
+            bounds = tuple(float(value) for value in dataset.bounds)
+            grid = RasterGrid(
+                crs=dataset.crs.to_string(),
+                width=dataset.width,
+                height=dataset.height,
+                transform=transform,
+                bounds=bounds,
+                nodata=float(dataset.nodata),
+            )
+            fingerprint = (grid.crs, grid.width, grid.height, grid.transform)
+            return RasterInspection(
+                fingerprint=fingerprint,
+                valid_ratio=valid_ratio,
+                grid=grid,
+            )
     except Exception as error:  # Rasterio raises several GDAL-backed exception types.
         report.add(logical_id, "GIS", False, f"raster is unreadable ({type(error).__name__})")
         return None
@@ -434,5 +456,20 @@ def run_preflight(
             "all four inputs share one pixel grid"
             if grids_ok
             else "the four raster inputs do not share one pixel grid",
+        )
+    if report.ok:
+        report.assets = tuple(
+            DataAssetRef(
+                dataset_id=asset.logical_id,
+                checksum_sha256=asset.sha256,
+                byte_size=asset.byte_size,
+                grid=(
+                    inspections[asset.logical_id].grid
+                    if asset.logical_id is not LogicalDatasetId.WATERSHED
+                    else None
+                ),
+                acquired_on=asset.acquired_on,
+            )
+            for asset in manifest.assets
         )
     return report
