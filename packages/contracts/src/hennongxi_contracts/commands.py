@@ -7,7 +7,7 @@ from enum import StrEnum
 from typing import Self
 from uuid import UUID
 
-from pydantic import Field, model_validator
+from pydantic import Field, FiniteFloat, model_validator
 
 from hennongxi_contracts.artifacts import ArtifactRef
 from hennongxi_contracts.common import (
@@ -48,6 +48,8 @@ class DataPrepareCommand(InternalCommand):
 
     @model_validator(mode="after")
     def require_dataset_allowlist(self) -> Self:
+        if self.step_id != "prepare_data":
+            raise ValueError("data preparation command requires the prepare_data step")
         if (
             len(self.dataset_ids) != len(REQUIRED_DATASET_IDS)
             or set(self.dataset_ids) != REQUIRED_DATASET_IDS
@@ -62,6 +64,7 @@ class RasterGrid(ContractModel):
     height: int = Field(ge=1)
     transform: tuple[float, float, float, float, float, float]
     bounds: tuple[float, float, float, float]
+    nodata: FiniteFloat
 
     @model_validator(mode="after")
     def require_valid_bounds(self) -> Self:

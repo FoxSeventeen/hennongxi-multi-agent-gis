@@ -1291,6 +1291,9 @@ components:
           maxItems: 4
           minItems: 4
           title: Bounds
+        nodata:
+          type: number
+          title: Nodata
       additionalProperties: false
       type: object
       required:
@@ -1299,6 +1302,7 @@ components:
       - height
       - transform
       - bounds
+      - nodata
       title: RasterGrid
     ReadinessBlocker:
       type: string

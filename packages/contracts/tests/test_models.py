@@ -19,6 +19,7 @@ from hennongxi_contracts import (
     PlanStep,
     PlanStepKind,
     QualityEvaluateCommand,
+    RasterGrid,
     StructuredError,
     TaskEvent,
     TaskResponse,
@@ -294,6 +295,30 @@ def test_data_command_requires_the_complete_logical_dataset_allowlist() -> None:
             correlation_id=CORRELATION_ID,
             dataset_ids=(LogicalDatasetId.WATERSHED,),
         )
+
+
+def test_data_command_is_scoped_to_the_prepare_data_step() -> None:
+    with pytest.raises(ValidationError, match="prepare_data"):
+        DataPrepareCommand(
+            task_id=TASK_ID,
+            step_id="analyze_ndvi_change",
+            attempt=1,
+            correlation_id=CORRELATION_ID,
+            dataset_ids=tuple(LogicalDatasetId),
+        )
+
+
+def test_raster_grid_carries_explicit_nodata_metadata() -> None:
+    grid = RasterGrid(
+        crs="EPSG:32649",
+        width=4072,
+        height=4675,
+        transform=(10.0, 0.0, 415240.0, 0.0, -10.0, 3481620.0),
+        bounds=(415240.0, 3434870.0, 455960.0, 3481620.0),
+        nodata=-9999.0,
+    )
+
+    assert grid.nodata == -9999.0
 
 
 def test_internal_command_rejects_an_arbitrary_input_path() -> None:
