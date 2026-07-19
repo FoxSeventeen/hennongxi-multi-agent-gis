@@ -35,6 +35,12 @@ def redis_test_url() -> str:
     return urlunsplit(parts._replace(path="/15"))
 
 
+def unavailable_redis_url() -> str:
+    parts = urlsplit(redis_test_url())
+    assert parts.hostname is not None
+    return urlunsplit(parts._replace(netloc=f"{parts.hostname}:6399"))
+
+
 @pytest_asyncio.fixture
 async def engine() -> AsyncIterator[AsyncEngine]:
     assert DATABASE_URL is not None
@@ -164,3 +170,62 @@ async def test_append_preserves_order_fields_and_bounded_replay(
     assert complete_replay.events == tuple(result.event for result in results)
     assert resumed_replay.source is ReplaySource.CACHE
     assert resumed_replay.events == tuple(result.event for result in results[1:])
+
+
+@pytest.mark.asyncio
+async def test_replay_falls_back_to_durable_history_after_redis_flush(
+    engine: AsyncEngine,
+    redis_client: Redis,
+) -> None:
+    repository = TaskRepository(engine)
+    await create_pending_task(repository)
+    store = EventStore(repository, redis_client)
+    appended = await store.append(
+        transition(
+            status=TaskStatus.PLANNING,
+            progress=5,
+            step_id="planning",
+            agent=AgentName.MASTER,
+        )
+    )
+
+    await redis_client.flushdb()
+    replay = await store.replay(TASK_ID)
+
+    assert replay.source is ReplaySource.DURABLE
+    assert replay.events == (appended.event,)
+
+
+@pytest.mark.asyncio
+async def test_redis_unavailability_never_loses_history_or_falsifies_task_state(
+    engine: AsyncEngine,
+) -> None:
+    repository = TaskRepository(engine)
+    await create_pending_task(repository)
+    unavailable = Redis.from_url(
+        unavailable_redis_url(),
+        decode_responses=True,
+        socket_connect_timeout=0.1,
+        socket_timeout=0.1,
+    )
+    try:
+        store = EventStore(repository, unavailable)
+        appended = await store.append(
+            transition(
+                status=TaskStatus.PLANNING,
+                progress=5,
+                step_id="planning",
+                agent=AgentName.MASTER,
+            )
+        )
+        replay = await store.replay(TASK_ID)
+        task = await repository.get_task(TASK_ID)
+    finally:
+        await unavailable.aclose()
+
+    assert not appended.cached
+    assert replay.source is ReplaySource.DURABLE
+    assert replay.events == (appended.event,)
+    assert task is not None
+    assert task.status is TaskStatus.PLANNING
+    assert task.progress == 5
