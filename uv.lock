@@ -300,17 +300,23 @@ name = "hennongxi-analysis-agent"
 version = "0.1.0"
 source = { editable = "services/analysis_agent" }
 dependencies = [
+    { name = "affine" },
     { name = "fastapi" },
     { name = "hennongxi-contracts" },
     { name = "hennongxi-observability" },
+    { name = "numpy" },
+    { name = "rasterio" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "affine", specifier = "==2.4.0" },
     { name = "fastapi", specifier = "==0.139.2" },
     { name = "hennongxi-contracts", editable = "packages/contracts" },
     { name = "hennongxi-observability", editable = "packages/observability" },
+    { name = "numpy", specifier = "==2.5.1" },
+    { name = "rasterio", specifier = "==1.5.0" },
     { name = "uvicorn", extras = ["standard"], specifier = "==0.51.0" },
 ]
 
