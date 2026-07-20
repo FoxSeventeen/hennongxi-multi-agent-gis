@@ -202,6 +202,7 @@ services:
       <<: *common-agent-environment
       HEALTHCHECK_URL: http://127.0.0.1:8004/internal/v1/health
       ARTIFACT_ROOT: ${ARTIFACT_ROOT:-/data/outputs}
+      QUALITY_REPORT_ROOT: ${QUALITY_REPORT_ROOT:-/data/quality-reports}
     ports:
       - "127.0.0.1:8004:8004"
     networks:
@@ -211,6 +212,10 @@ services:
       - type: volume
         source: artifacts
         target: /data/outputs
+      - type: volume
+        source: quality-reports
+        target: /data/quality-reports
+        read_only: true
 
   postgis:
     image: hennongxi/postgis:17-3.6.4

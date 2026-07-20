@@ -86,6 +86,7 @@ def test_shared_storage_has_least_privilege_access_modes() -> None:
         is False
     )
     assert publisher_mounts[("artifacts", "/data/outputs")].get("read_only", False) is False
+    assert publisher_mounts[("quality-reports", "/data/quality-reports")]["read_only"] is True
 
     assert (
         volume_mounts(services["postgis"])[("postgres-data", "/var/lib/postgresql/data")].get(

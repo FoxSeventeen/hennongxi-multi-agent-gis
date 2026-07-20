@@ -56,6 +56,18 @@ def _errors(*status_codes: int) -> dict[int | str, dict[str, object]]:
     }
 
 
+def _resource_errors(*status_codes: int) -> dict[int | str, dict[str, object]]:
+    return {
+        status_code: {
+            "description": "Structured error without secret or provider payload fields.",
+            "content": {
+                "application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}
+            },
+        }
+        for status_code in status_codes
+    }
+
+
 def create_contract_app() -> FastAPI:
     """Describe public and internal routes while keeping runtime handlers elsewhere."""
 
@@ -104,7 +116,7 @@ def create_contract_app() -> FastAPI:
         tags=["Master public"],
         response_model=TaskEvent,
         response_class=EventStreamResponse,
-        responses=_errors(404, 422),
+        responses=_resource_errors(404, 422),
         openapi_extra={
             "description": (
                 "SSE stream. Each event id is the durable monotonic sequence and each data "
@@ -153,7 +165,7 @@ def create_contract_app() -> FastAPI:
         operation_id="getArtifactTile",
         tags=["Publisher resources"],
         response_class=PngResponse,
-        responses=_errors(404, 409, 422),
+        responses=_resource_errors(404, 409, 422, 500),
     )
     def get_artifact_tile(
         task_id: Annotated[UUID, Path()],
@@ -169,7 +181,7 @@ def create_contract_app() -> FastAPI:
         operation_id="downloadArtifact",
         tags=["Publisher resources"],
         response_class=ArtifactDownloadResponse,
-        responses=_errors(404, 409, 422),
+        responses=_resource_errors(404, 409, 422),
     )
     def download_artifact(
         task_id: Annotated[UUID, Path()], artifact_id: Annotated[UUID, Path()]

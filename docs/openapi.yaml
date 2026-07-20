@@ -96,13 +96,13 @@ paths:
         '404':
           description: Structured error without secret or provider payload fields.
           content:
-            text/event-stream:
+            application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Structured error without secret or provider payload fields.
           content:
-            text/event-stream:
+            application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
       description: SSE stream. Each event id is the durable monotonic sequence and each data field is
@@ -225,19 +225,25 @@ paths:
         '404':
           description: Structured error without secret or provider payload fields.
           content:
-            image/png:
+            application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '409':
           description: Structured error without secret or provider payload fields.
           content:
-            image/png:
+            application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Structured error without secret or provider payload fields.
           content:
-            image/png:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Structured error without secret or provider payload fields.
+          content:
+            application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
   /api/v1/tasks/{task_id}/artifacts/{artifact_id}/download:
@@ -271,19 +277,19 @@ paths:
         '404':
           description: Structured error without secret or provider payload fields.
           content:
-            application/octet-stream:
+            application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '409':
           description: Structured error without secret or provider payload fields.
           content:
-            application/octet-stream:
+            application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Structured error without secret or provider payload fields.
           content:
-            application/octet-stream:
+            application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
   /internal/v1/health:

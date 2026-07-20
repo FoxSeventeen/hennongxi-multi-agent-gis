@@ -71,6 +71,17 @@ def test_publisher_resource_routes_are_read_only() -> None:
             assert operations == {"get"}
 
 
+def test_tile_route_documents_png_success_and_json_failures() -> None:
+    document = load_checked_in_openapi()
+    responses = document["paths"]["/api/v1/tiles/{task_id}/{artifact_type}/{z}/{x}/{y}.png"]["get"][
+        "responses"
+    ]
+
+    assert set(responses["200"]["content"]) == {"image/png"}
+    for status_code in ("404", "409", "422", "500"):
+        assert set(responses[status_code]["content"]) == {"application/json"}
+
+
 def test_analysis_route_requires_idempotency_header_and_returns_timing() -> None:
     document = load_checked_in_openapi()
     operation = document["paths"]["/internal/v1/analysis/run"]["post"]
