@@ -346,26 +346,27 @@ The critical path is contracts → persistence/events → raster chain → orche
 
 ### Phase 4: Computed products, quality, and publishing
 
-#### Task 10: Expose Analysis Agent execution and atomic artifacts
+#### 任务 10：暴露 Analysis Agent 执行接口并原子发布成果
 
-**Description:** Wrap the proven raster core in the internal Analysis HTTP command, write task-scoped artifacts atomically to the named volume, calculate statistics, and return checksum-bearing artifact metadata and timings.
+**说明：** 将已验证的栅格核心接入内部 Analysis HTTP 命令，把任务级成果原子写入命名卷，计算面积统计，并返回带校验和、耗时和完整作用域的成果元数据。
 
-**Acceptance criteria:**
+**验收标准：**
 
-- [ ] One HTTP request generates two NDVI rasters, one difference raster, classified change, and area statistics under the correct task attempt.
-- [ ] Duplicate idempotency keys return the existing verified result; partial/failed writes are not published as complete.
-- [ ] Progress/log messages contain correlation metadata and no raw secret/private path content.
+- [x] 一个 HTTP 请求在正确的 task/attempt 下生成两期 NDVI、差值、变化分级 GeoTIFF 和面积统计 JSON。
+- [x] 重复幂等键返回经校验的既有结果；失败或残留的 staging 写入不会发布为完整成果。
+- [x] 进度日志携带 task、step、attempt 和 correlation 标识，不记录密钥、请求体或私有文件路径。
 
-**Verification:**
+**验证：**
 
-- [ ] `docker compose run --rm analysis-agent pytest services/analysis_agent/tests -q`
-- [ ] GDAL/Rasterio inspection validates each artifact's CRS, bounds, nodata, dimensions, and checksum.
+- [x] `docker compose run --rm analysis-agent pytest services/analysis_agent/tests -q`
+- [x] 真实 Compose 私网 Data→Analysis 测试重新打开每个成果，校验 CRS、bounds、nodata、尺寸、SHA-256 和重复请求复用。
+- [x] 最终后端全量测试为 `140 passed, 1 skipped`；需成果卷的真实网络用例另行运行并通过。
 
-**Dependencies:** T04, T08, T09.
+**依赖：** T04、T08、T09。
 
-**Files likely touched:** `services/analysis_agent/app/main.py`, execution/artifact modules, `services/analysis_agent/tests/`.
+**实际修改文件：** `services/analysis_agent/src/hennongxi_analysis_agent/`、`services/analysis_agent/tests/`、共享契约/OpenAPI、Compose 环境和后端测试镜像。
 
-**Estimated scope:** M.
+**规模：** M。
 
 #### Task 11: Deliver independent Quality Agent evaluation
 

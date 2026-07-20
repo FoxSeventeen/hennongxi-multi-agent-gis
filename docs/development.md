@@ -158,3 +158,26 @@ docker compose run --rm analysis-agent \
 ```
 
 该命令覆盖 NDVI 数值、掩膜传播、零分母、网格错配、跨 CRS 完整流域裁剪、地理参考保持、分级边界、旋转/错切像元面积和地理 CRS 拒绝。T10 才负责受约束 HTTP 命令、任务级原子 GeoTIFF/JSON 写入与成果校验。
+
+## Analysis Agent HTTP 与原子成果
+
+Analysis Agent 的私网端点为 `POST /internal/v1/analysis/run`。请求体必须符合共享 `AnalysisRunCommand`，同时携带 UUID 格式的 `Idempotency-Key` 与 `X-Correlation-ID` 头；关联头必须和请求体中的 `correlation_id` 一致。服务只接受 Data Agent 返回的五个逻辑资产引用，会重新对照受控清单、只读缓存中的文件大小、SHA-256 和完整栅格网格；请求不能提供任何文件路径。
+
+每个 task/attempt 只允许一个 Analysis 成果集。五个固定成果先写入同一命名卷内的隐藏 staging 目录，依次关闭、刷新并校验后，再通过同文件系统目录替换一次性发布；收据最后写入。异常、进程崩溃或校验失败不会产生可见的 `analysis/` 完整目录，下一次同 attempt 执行会在持锁状态下清理残留 staging。相同幂等键只返回 checksum 仍有效的既有结果；不同幂等键不能覆盖已发布 attempt。
+
+公开的成果元数据仅包含 UUID、类型、状态、媒体类型、UTC 时间、SHA-256 和字节数，不包含卷路径。正常日志使用 `analysis_started`、`analysis_completed`、`analysis_reused` 和 `analysis_failed` 事件，并携带 task、step、attempt、correlation、耗时和成果数量；结构化错误与意外错误响应不会回显请求体、异常消息或私有路径。
+
+服务测试和真实私网/成果卷检查命令如下：
+
+```bash
+docker compose run --rm analysis-agent \
+  pytest services/analysis_agent/tests -q
+
+docker compose run --rm --no-deps \
+  --env DATA_AGENT_BASE_URL=http://data-agent:8001 \
+  --env ANALYSIS_AGENT_BASE_URL=http://analysis-agent:8002 \
+  analysis-agent \
+  pytest services/analysis_agent/tests/integration/test_analysis_network.py -q
+```
+
+第二条命令先通过 Data Agent 私网接口取得真实 2019-08-19/2024-08-12 资产元数据，再调用 Analysis Agent 两次。测试会验证首次生成与第二次幂等复用，并从成果卷重新打开四个 GeoTIFF 和面积统计 JSON，核对 CRS、bounds、nodata、尺寸、阈值、有效像元和 SHA-256。Analysis Agent 没有宿主端口；Master 后续只能通过 Compose 私网调用该接口。

@@ -84,10 +84,10 @@ Source of truth: `docs/spec.md` at `92e50a6`. Detailed rationale, file scope, an
 
 ## Day 4 — Analysis, quality, and tiles
 
-- [ ] **T10 Expose Analysis Agent and atomic artifacts** (depends: T04, T08-T09)
-  - [ ] Generate two NDVI rasters, difference, classification, and area statistics by HTTP.
-  - [ ] Enforce task-scoped atomic writes, checksums, idempotency, and no partial publication.
-  - [ ] Pass service tests and GDAL/Rasterio artifact inspection.
+- [x] **T10 暴露 Analysis Agent 并原子发布成果**（依赖：T04、T08-T09）
+  - [x] 通过 HTTP 生成两期 NDVI、差值、变化分级和面积统计。
+  - [x] 强制任务级原子写入、校验和、幂等复用，并禁止发布部分成果。
+  - [x] 通过服务测试、真实私网测试和 GDAL/Rasterio 成果检查。
 - [ ] **T11 Deliver independent Quality Agent** (depends: T02, T04, T10)
   - [ ] Compute coverage, valid pixels, completeness, and elapsed time with thresholds/evidence.
   - [ ] Fail missing/corrupt/insufficient outputs and cover threshold edges.
