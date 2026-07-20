@@ -9,7 +9,12 @@ from uuid import UUID
 
 from pydantic import Field, FiniteFloat, model_validator
 
-from hennongxi_contracts.artifacts import ArtifactRef, ArtifactStatus, ArtifactType
+from hennongxi_contracts.artifacts import (
+    ArtifactRef,
+    ArtifactStatus,
+    ArtifactType,
+    TileMetadata,
+)
 from hennongxi_contracts.common import (
     ContractModel,
     Sha256Digest,
@@ -247,6 +252,25 @@ class PublisherPublishCommand(InternalCommand):
     @model_validator(mode="after")
     def require_artifact_scope(self) -> Self:
         _require_artifact_scope(self.task_id, self.attempt, self.artifacts)
+        required_types = frozenset(
+            {
+                ArtifactType.NDVI_BEFORE,
+                ArtifactType.NDVI_AFTER,
+                ArtifactType.NDVI_DIFFERENCE,
+                ArtifactType.CHANGE_CLASSIFICATION,
+                ArtifactType.AREA_STATISTICS,
+                ArtifactType.QUALITY_REPORT,
+            }
+        )
+        artifact_types = tuple(artifact.artifact_type for artifact in self.artifacts)
+        if self.step_id != "publish_results":
+            raise ValueError("publisher command requires the publish_results step")
+        if len(artifact_types) != len(required_types) or set(artifact_types) != required_types:
+            raise ValueError("publisher command requires the complete publishable artifact set")
+        if any(artifact.status is not ArtifactStatus.COMPLETE for artifact in self.artifacts):
+            raise ValueError("publisher command requires complete artifacts")
+        if self.quality.conclusion is not QualityConclusion.PASS or not self.quality.passed:
+            raise ValueError("publisher command requires passing quality")
         return self
 
 
@@ -254,6 +278,7 @@ class PublishedResource(ContractModel):
     artifact_id: UUID
     tile_template: ShortText | None = None
     download_path: ShortText | None = None
+    tile_metadata: TileMetadata | None = None
 
     @model_validator(mode="after")
     def require_safe_relative_routes(self) -> Self:
@@ -264,6 +289,16 @@ class PublishedResource(ContractModel):
                 raise ValueError("published resources must use safe /api/v1/ routes")
         if self.tile_template is None and self.download_path is None:
             raise ValueError("published resource requires a tile or download route")
+        if self.tile_template is not None:
+            if self.tile_metadata is None:
+                raise ValueError("published tile resource requires tile metadata")
+            expected_segment = f"/{self.tile_metadata.artifact_type.value}/"
+            if expected_segment not in self.tile_template or not self.tile_template.endswith(
+                "/{z}/{x}/{y}.png"
+            ):
+                raise ValueError("tile metadata must match the tile template")
+        elif self.tile_metadata is not None:
+            raise ValueError("tile metadata requires a tile template")
         return self
 
 

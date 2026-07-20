@@ -5,6 +5,8 @@ from hennongxi_contracts.artifacts import (
     ArtifactStatus,
     ArtifactType,
     TileArtifactType,
+    TileLegendEntry,
+    TileMetadata,
 )
 from hennongxi_contracts.commands import (
     AnalysisRunCommand,
@@ -110,5 +112,7 @@ __all__ = [
     "TaskStatus",
     "TaskStep",
     "TileArtifactType",
+    "TileLegendEntry",
+    "TileMetadata",
     "require_task_transition",
 ]

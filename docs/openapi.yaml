@@ -1088,6 +1088,10 @@ components:
             minLength: 1
           - type: 'null'
           title: Download Path
+        tile_metadata:
+          anyOf:
+          - $ref: '#/components/schemas/TileMetadata'
+          - type: 'null'
       additionalProperties: false
       type: object
       required:
@@ -1804,3 +1808,84 @@ components:
       - NDVI_DIFFERENCE
       - CHANGE_CLASSIFICATION
       title: TileArtifactType
+    TileLegendEntry:
+      properties:
+        schema_version:
+          type: string
+          const: '1.0'
+          title: Schema Version
+          default: '1.0'
+        value:
+          type: number
+          title: Value
+        label:
+          type: string
+          maxLength: 200
+          minLength: 1
+          title: Label
+        color:
+          type: string
+          pattern: ^#[0-9A-Fa-f]{6}$
+          title: Color
+      additionalProperties: false
+      type: object
+      required:
+      - value
+      - label
+      - color
+      title: TileLegendEntry
+    TileMetadata:
+      properties:
+        schema_version:
+          type: string
+          const: '1.0'
+          title: Schema Version
+          default: '1.0'
+        artifact_type:
+          $ref: '#/components/schemas/TileArtifactType'
+        bounds_wgs84:
+          prefixItems:
+          - type: number
+          - type: number
+          - type: number
+          - type: number
+          type: array
+          maxItems: 4
+          minItems: 4
+          title: Bounds Wgs84
+        start_date:
+          type: string
+          format: date
+          title: Start Date
+        end_date:
+          type: string
+          format: date
+          title: End Date
+        units:
+          type: string
+          maxLength: 200
+          minLength: 1
+          title: Units
+        attribution:
+          type: string
+          maxLength: 200
+          minLength: 1
+          title: Attribution
+        legend:
+          items:
+            $ref: '#/components/schemas/TileLegendEntry'
+          type: array
+          maxItems: 12
+          minItems: 2
+          title: Legend
+      additionalProperties: false
+      type: object
+      required:
+      - artifact_type
+      - bounds_wgs84
+      - start_date
+      - end_date
+      - units
+      - attribution
+      - legend
+      title: TileMetadata

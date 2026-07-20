@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from datetime import date
 from enum import StrEnum
-from typing import Self
+from typing import Annotated, Self
 from uuid import UUID
 
-from pydantic import Field, model_validator
+from pydantic import Field, FiniteFloat, StringConstraints, model_validator
 
 from hennongxi_contracts.common import (
     ContractModel,
@@ -33,6 +34,39 @@ class TileArtifactType(StrEnum):
     NDVI_AFTER = "NDVI_AFTER"
     NDVI_DIFFERENCE = "NDVI_DIFFERENCE"
     CHANGE_CLASSIFICATION = "CHANGE_CLASSIFICATION"
+
+
+HexColor = Annotated[str, StringConstraints(pattern=r"^#[0-9A-Fa-f]{6}$")]
+
+
+class TileLegendEntry(ContractModel):
+    value: FiniteFloat
+    label: ShortText
+    color: HexColor
+
+
+class TileMetadata(ContractModel):
+    artifact_type: TileArtifactType
+    bounds_wgs84: tuple[FiniteFloat, FiniteFloat, FiniteFloat, FiniteFloat]
+    start_date: date
+    end_date: date
+    units: ShortText
+    attribution: ShortText
+    legend: tuple[TileLegendEntry, ...] = Field(min_length=2, max_length=12)
+
+    @model_validator(mode="after")
+    def require_safe_visualization_metadata(self) -> Self:
+        west, south, east, north = self.bounds_wgs84
+        if not (-180 <= west < east <= 180 and -90 <= south < north <= 90):
+            raise ValueError("WGS84 bounds must be ordered and within the valid domain")
+        if self.start_date > self.end_date:
+            raise ValueError("tile start_date cannot be after end_date")
+        values = tuple(entry.value for entry in self.legend)
+        if any(
+            current >= following for current, following in zip(values, values[1:], strict=False)
+        ):
+            raise ValueError("tile legend values must be strictly increasing")
+        return self
 
 
 class ArtifactStatus(StrEnum):

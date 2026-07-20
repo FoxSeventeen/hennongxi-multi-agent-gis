@@ -103,3 +103,23 @@ def test_quality_route_requires_idempotency_and_correlation_headers() -> None:
     metrics_schema = document["components"]["schemas"]["QualityMetrics"]
     assert {"thresholds", "conclusion", "evidence"} <= set(metrics_schema["required"])
     assert "500" in operation["responses"]
+
+
+def test_publisher_resources_expose_complete_tile_visualization_metadata() -> None:
+    document = load_checked_in_openapi()
+    schemas = document["components"]["schemas"]
+
+    resource = schemas["PublishedResource"]
+    assert "tile_metadata" in resource["properties"]
+    tile_metadata = schemas["TileMetadata"]
+    assert {
+        "artifact_type",
+        "bounds_wgs84",
+        "start_date",
+        "end_date",
+        "units",
+        "attribution",
+        "legend",
+    } <= set(tile_metadata["required"])
+    legend = schemas["TileLegendEntry"]
+    assert {"value", "label", "color"} <= set(legend["required"])

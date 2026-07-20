@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta, timezone
 from uuid import UUID
 
 import pytest
@@ -20,6 +20,8 @@ from hennongxi_contracts import (
     PlanSource,
     PlanStep,
     PlanStepKind,
+    PublishedResource,
+    PublisherPublishCommand,
     QualityConclusion,
     QualityEvaluateCommand,
     QualityEvaluateResult,
@@ -30,6 +32,9 @@ from hennongxi_contracts import (
     TaskEvent,
     TaskResponse,
     TaskStatus,
+    TileArtifactType,
+    TileLegendEntry,
+    TileMetadata,
 )
 from pydantic import ValidationError
 
@@ -526,6 +531,122 @@ def test_quality_result_requires_a_complete_quality_report() -> None:
             correlation_id=CORRELATION_ID,
             metrics=metrics,
             artifact=valid_artifact(artifact_type=ArtifactType.NDVI_BEFORE),
+        )
+
+
+def _passing_quality() -> QualityMetrics:
+    return QualityMetrics(
+        coverage_ratio=0.95,
+        valid_pixel_ratio=0.90,
+        output_complete=True,
+        elapsed_ms=10,
+        thresholds=QualityThresholds(
+            minimum_watershed_coverage_ratio=0.95,
+            minimum_valid_pixel_ratio=0.90,
+        ),
+        conclusion=QualityConclusion.PASS,
+        passed=True,
+        evidence=("覆盖达标", "有效像元达标", "输出完整", "耗时已记录"),
+    )
+
+
+def _tile_metadata() -> TileMetadata:
+    return TileMetadata(
+        artifact_type=TileArtifactType.NDVI_BEFORE,
+        bounds_wgs84=(110.0, 31.0, 111.0, 32.0),
+        start_date=date(2019, 8, 19),
+        end_date=date(2019, 8, 19),
+        units="NDVI",
+        attribution="Copernicus Sentinel-2 / Element 84 Earth Search",
+        legend=(
+            TileLegendEntry(value=-1.0, label="低", color="#8C510A"),
+            TileLegendEntry(value=0.0, label="中", color="#F6E8C3"),
+            TileLegendEntry(value=1.0, label="高", color="#01665E"),
+        ),
+    )
+
+
+def test_tile_metadata_requires_safe_bounds_dates_and_ordered_color_stops() -> None:
+    metadata = _tile_metadata()
+
+    assert metadata.bounds_wgs84 == (110.0, 31.0, 111.0, 32.0)
+    assert metadata.legend[0].color == "#8C510A"
+
+    with pytest.raises(ValidationError, match="WGS84 bounds"):
+        TileMetadata(
+            **{
+                **_tile_metadata().model_dump(exclude={"bounds_wgs84"}),
+                "bounds_wgs84": (111.0, 31.0, 110.0, 32.0),
+            }
+        )
+
+    with pytest.raises(ValidationError, match="strictly increasing"):
+        TileMetadata(
+            **{
+                **_tile_metadata().model_dump(exclude={"legend"}),
+                "legend": (
+                    TileLegendEntry(value=0, label="零", color="#000000"),
+                    TileLegendEntry(value=0, label="重复", color="#FFFFFF"),
+                ),
+            }
+        )
+
+
+def test_published_tile_resource_requires_matching_visual_metadata() -> None:
+    resource = PublishedResource(
+        artifact_id=valid_artifact().artifact_id,
+        tile_template=(f"/api/v1/tiles/{TASK_ID}/NDVI_BEFORE/{{z}}/{{x}}/{{y}}.png"),
+        tile_metadata=_tile_metadata(),
+    )
+
+    assert resource.tile_metadata is not None
+
+    with pytest.raises(ValidationError, match="tile metadata"):
+        PublishedResource(
+            artifact_id=valid_artifact().artifact_id,
+            tile_template=(f"/api/v1/tiles/{TASK_ID}/NDVI_BEFORE/{{z}}/{{x}}/{{y}}.png"),
+        )
+
+
+def test_publisher_command_requires_complete_passing_inputs() -> None:
+    required_types = (
+        ArtifactType.NDVI_BEFORE,
+        ArtifactType.NDVI_AFTER,
+        ArtifactType.NDVI_DIFFERENCE,
+        ArtifactType.CHANGE_CLASSIFICATION,
+        ArtifactType.AREA_STATISTICS,
+        ArtifactType.QUALITY_REPORT,
+    )
+    command = PublisherPublishCommand(
+        task_id=TASK_ID,
+        step_id="publish_results",
+        attempt=1,
+        correlation_id=CORRELATION_ID,
+        artifacts=tuple(valid_artifact(artifact_type=value) for value in required_types),
+        quality=_passing_quality(),
+    )
+    assert len(command.artifacts) == 6
+
+    with pytest.raises(ValidationError, match="complete publishable artifact set"):
+        PublisherPublishCommand(
+            task_id=TASK_ID,
+            step_id="publish_results",
+            attempt=1,
+            correlation_id=CORRELATION_ID,
+            artifacts=(valid_artifact(),),
+            quality=_passing_quality(),
+        )
+
+    with pytest.raises(ValidationError, match="passing quality"):
+        PublisherPublishCommand(
+            task_id=TASK_ID,
+            step_id="publish_results",
+            attempt=1,
+            correlation_id=CORRELATION_ID,
+            artifacts=tuple(valid_artifact(artifact_type=value) for value in required_types),
+            quality=_passing_quality().model_copy(
+                update={"conclusion": QualityConclusion.FAIL, "passed": False}
+            ),
         )
 
 
