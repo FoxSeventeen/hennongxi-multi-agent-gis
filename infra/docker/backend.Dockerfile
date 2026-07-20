@@ -22,7 +22,7 @@ ENV PATH=/app/.venv/bin:${PATH} \
     PYTHONUNBUFFERED=1
 
 RUN apt-get update \
-    && apt-get install --yes --no-install-recommends libexpat1 \
+    && apt-get install --yes --no-install-recommends libexpat1 poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 
 RUN groupadd --gid 10001 app \

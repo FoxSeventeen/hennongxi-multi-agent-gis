@@ -24,7 +24,10 @@
 - 持久化与事件：SQLAlchemy `2.0.51`、Alembic `1.18.5`、asyncpg `0.31.0`、redis-py `8.0.1`。
 - GIS 与报告：NumPy `2.5.1`、Rasterio `1.5.0`、GeoPandas `1.1.4`、Shapely `2.1.2`、Rio-Tiler `9.4.0`、ReportLab `5.0.0`。
 - 可观测性：structlog `26.1.0`。
-- 开发质量门：pytest `9.1.1`、pytest-asyncio `1.4.0`、pytest-cov `7.1.0`、RESPX `0.22.0`、OpenAPI Spec Validator `0.7.2`、PyYAML `6.0.3`/types-PyYAML `6.0.12.20260518`、Ruff `0.15.22`、mypy `2.3.0`。
+- 开发质量门：pytest `9.1.1`、pytest-asyncio `1.4.0`、pytest-cov `7.1.0`、RESPX `0.22.0`、OpenAPI Spec Validator `0.7.2`、pypdf `6.14.2`、PyYAML `6.0.3`/types-PyYAML `6.0.12.20260518`、Ruff `0.15.22`、mypy `2.3.0`。
+
+T13 的 PDF 自动验收使用 pypdf 提取文本，并在后端镜像中安装 Debian `poppler-utils`
+执行 `pdfinfo`/`pdftoppm` 页面渲染。它们只用于验证和资源交付，不参与 GIS 数值计算。
 
 Rasterio `1.5.0` 要求 Python 3.12、NumPy 2 和 GDAL 3.8 以上；本地锁文件验证 Python 层解析，T04 再用目标容器验证系统动态库和真实 raster I/O。
 
@@ -78,6 +81,7 @@ pnpm --dir apps/web exec vitest --version
 - [Node.js 发布状态](https://nodejs.org/en/about/previous-releases) 与 [Node 官方镜像](https://hub.docker.com/_/node)
 - [uv 锁文件文档](https://docs.astral.sh/uv/concepts/projects/layout/#the-lockfile)
 - [FastAPI 发布说明](https://fastapi.tiangolo.com/release-notes/)、[Pydantic 发布说明](https://docs.pydantic.dev/latest/changelog/) 与 [Rasterio 安装说明](https://rasterio.readthedocs.io/en/stable/installation.html)
+- [ReportLab TrueType 字体说明](https://docs.reportlab.com/reportlab/userguide/ch3_fonts/)、[pypdf 安装说明](https://pypdf.readthedocs.io/en/stable/user/installation.html) 与 [Poppler 工具](https://poppler.freedesktop.org/)
 - [PostgreSQL 官方镜像](https://hub.docker.com/_/postgres)、[PostGIS 安装说明](https://postgis.net/documentation/getting_started/install_ubuntu/)、[PGDG PostGIS 包](https://apt.postgresql.org/pub/repos/apt/pool/main/p/postgis/) 与 [postgis/postgis 架构声明](https://github.com/postgis/docker-postgis)
 - [Redis 官方镜像](https://hub.docker.com/_/redis)
 - [React 19.2](https://react.dev/blog/2025/10/01/react-19-2)、[Vite 发布记录](https://vite.dev/blog)、[TypeScript 发布说明](https://www.typescriptlang.org/docs/handbook/release-notes/overview.html) 与 [MapLibre GL JS](https://www.npmjs.com/package/maplibre-gl?activeTab=versions)
