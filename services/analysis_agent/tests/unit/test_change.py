@@ -86,9 +86,10 @@ def test_area_statistics_use_affine_pixel_area_and_sum_every_valid_class() -> No
         values=np.asarray([[-1, 0, 1], [-1, 1, CHANGE_NODATA]], dtype=np.int8),
         valid_mask=np.asarray([[True, True, True], [True, True, False]], dtype=np.bool_),
         grid=grid,
+        threshold=0.1,
     )
 
-    result = summarize_class_areas(classified, threshold=0.1)
+    result = summarize_class_areas(classified)
 
     assert result.pixel_area_square_metres == pytest.approx(102.0, abs=1e-9)
     assert result.valid_pixel_count == 5
@@ -108,6 +109,14 @@ def test_area_statistics_use_affine_pixel_area_and_sum_every_valid_class() -> No
     assert result.threshold == 0.1
 
 
+def test_area_statistics_report_the_threshold_used_to_classify() -> None:
+    classified = classify_change(_continuous([[-0.3, 0.0, 0.3]]), threshold=0.2)
+
+    result = summarize_class_areas(classified)
+
+    assert result.threshold == 0.2
+
+
 def test_area_statistics_reject_geographic_crs() -> None:
     geographic = ClassifiedRaster(
         values=np.asarray([[0]], dtype=np.int8),
@@ -118,10 +127,11 @@ def test_area_statistics_reject_geographic_crs() -> None:
             height=1,
             width=1,
         ),
+        threshold=0.1,
     )
 
     with pytest.raises(AreaCalculationError, match="projected"):
-        summarize_class_areas(geographic, threshold=0.1)
+        summarize_class_areas(geographic)
 
 
 def test_area_statistics_reject_degenerate_pixel_transform() -> None:
@@ -134,10 +144,11 @@ def test_area_statistics_reject_degenerate_pixel_transform() -> None:
             height=1,
             width=1,
         ),
+        threshold=0.1,
     )
 
     with pytest.raises(AreaCalculationError, match="pixel area"):
-        summarize_class_areas(degenerate, threshold=0.1)
+        summarize_class_areas(degenerate)
 
 
 def test_classified_raster_rejects_unknown_valid_class_code() -> None:
@@ -151,4 +162,5 @@ def test_classified_raster_rejects_unknown_valid_class_code() -> None:
                 height=1,
                 width=1,
             ),
+            threshold=0.1,
         )

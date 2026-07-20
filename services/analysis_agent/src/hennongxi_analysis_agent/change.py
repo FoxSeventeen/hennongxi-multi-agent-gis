@@ -34,9 +34,11 @@ class ClassifiedRaster:
     values: NDArray[np.int8]
     valid_mask: NDArray[np.bool_]
     grid: RasterGrid
+    threshold: float
     nodata: int = CHANGE_NODATA
 
     def __post_init__(self) -> None:
+        _require_threshold(self.threshold)
         if self.values.shape != self.grid.shape:
             raise ValueError("values shape does not match raster grid")
         if self.valid_mask.shape != self.grid.shape:
@@ -80,17 +82,17 @@ def classify_change(
     values[valid_mask] = ChangeClass.STABLE
     values[valid_mask & (difference.values <= -threshold)] = ChangeClass.DECREASE
     values[valid_mask & (difference.values >= threshold)] = ChangeClass.INCREASE
-    return ClassifiedRaster(values=values, valid_mask=valid_mask, grid=difference.grid)
+    return ClassifiedRaster(
+        values=values,
+        valid_mask=valid_mask,
+        grid=difference.grid,
+        threshold=threshold,
+    )
 
 
-def summarize_class_areas(
-    classified: ClassifiedRaster,
-    *,
-    threshold: float = DEFAULT_CHANGE_THRESHOLD,
-) -> AreaStatistics:
+def summarize_class_areas(classified: ClassifiedRaster) -> AreaStatistics:
     """Summarize class areas in square metres from a projected affine grid."""
 
-    _require_threshold(threshold)
     if not classified.grid.crs.is_projected:
         raise AreaCalculationError("area statistics require a projected crs")
 
@@ -107,7 +109,7 @@ def summarize_class_areas(
     increase_count = int(np.count_nonzero(valid & (classified.values == ChangeClass.INCREASE)))
     valid_count = decrease_count + stable_count + increase_count
     return AreaStatistics(
-        threshold=threshold,
+        threshold=classified.threshold,
         pixel_area_square_metres=pixel_area_square_metres,
         valid_pixel_count=valid_count,
         decrease_pixel_count=decrease_count,
