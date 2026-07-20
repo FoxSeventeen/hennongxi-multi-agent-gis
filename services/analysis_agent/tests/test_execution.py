@@ -61,9 +61,7 @@ def _write_fixture(tmp_path: Path) -> tuple[Path, Path, Path, tuple[DataAssetRef
                         "properties": {},
                         "geometry": {
                             "type": "Polygon",
-                            "coordinates": [
-                                [[0, 0], [40, 0], [40, 40], [0, 40], [0, 0]]
-                            ],
+                            "coordinates": [[[0, 0], [40, 0], [40, 40], [0, 40], [0, 0]]],
                         },
                     }
                 ],
@@ -131,9 +129,7 @@ def _write_fixture(tmp_path: Path) -> tuple[Path, Path, Path, tuple[DataAssetRef
                 checksum_sha256=_sha256(raster_path),
                 byte_size=raster_path.stat().st_size,
                 grid=grid,
-                acquired_on="2019-08-19"
-                if dataset_id.value.startswith("before")
-                else "2024-08-12",
+                acquired_on="2019-08-19" if dataset_id.value.startswith("before") else "2024-08-12",
             )
         )
 
@@ -191,9 +187,7 @@ def test_executor_writes_georeferenced_rasters_and_detailed_area_statistics(
             assert dataset.bounds == rasterio.coords.BoundingBox(0, 0, 40, 40)
             assert dataset.width == 4
             assert dataset.height == 4
-            expected_nodata = (
-                -128 if artifact_type is ArtifactType.CHANGE_CLASSIFICATION else -9999
-            )
+            expected_nodata = -128 if artifact_type is ArtifactType.CHANGE_CLASSIFICATION else -9999
             assert dataset.nodata == expected_nodata
         assert _sha256(artifact_path) == by_type[artifact_type].checksum_sha256
 

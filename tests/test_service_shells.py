@@ -47,6 +47,8 @@ def test_each_agent_exposes_only_its_approved_health_routes(
         expected_paths |= {"/api/v1/health", "/api/v1/config/readiness"}
     if service_name == "data":
         expected_paths.add("/internal/v1/data/prepare")
+    if service_name == "analysis":
+        expected_paths.add("/internal/v1/analysis/run")
     assert application_paths == expected_paths
     with TestClient(app) as client:
         response = client.get("/internal/v1/health")

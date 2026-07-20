@@ -113,9 +113,7 @@ def _result() -> AnalysisRunResult:
 @pytest.fixture
 def configured_app() -> Iterator[FastAPI]:
     original = app.state.analysis_executor
-    app.state.analysis_executor = _StubExecutor(
-        AnalysisOutcome(result=_result(), reused=False)
-    )
+    app.state.analysis_executor = _StubExecutor(AnalysisOutcome(result=_result(), reused=False))
     try:
         yield app
     finally:

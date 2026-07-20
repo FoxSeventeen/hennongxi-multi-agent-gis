@@ -36,9 +36,7 @@ app.state.analysis_executor = AnalysisExecutor(
     _manifest_path,
     data_root=_manifest_path.parent,
     cache_dir=Path(os.environ.get("DATA_CACHE_DIR", "/data/cache")),
-    artifact_store=AnalysisArtifactStore(
-        Path(os.environ.get("ARTIFACT_ROOT", "/data/outputs"))
-    ),
+    artifact_store=AnalysisArtifactStore(Path(os.environ.get("ARTIFACT_ROOT", "/data/outputs"))),
 )
 _logger = structlog.get_logger("hennongxi.analysis")
 

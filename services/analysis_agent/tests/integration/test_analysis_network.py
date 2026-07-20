@@ -19,15 +19,16 @@ from hennongxi_observability import CORRELATION_ID_HEADER
 
 DATA_AGENT_BASE_URL = os.environ.get("DATA_AGENT_BASE_URL")
 ANALYSIS_AGENT_BASE_URL = os.environ.get("ANALYSIS_AGENT_BASE_URL")
+ARTIFACT_ROOT_VALUE = os.environ.get("ARTIFACT_ROOT")
 pytestmark = pytest.mark.skipif(
-    DATA_AGENT_BASE_URL is None or ANALYSIS_AGENT_BASE_URL is None,
-    reason="Master-style Analysis Agent network integration test",
+    DATA_AGENT_BASE_URL is None or ANALYSIS_AGENT_BASE_URL is None or ARTIFACT_ROOT_VALUE is None,
+    reason="Analysis network test requires Agent URLs and the mounted artifact volume",
 )
 
 TASK_ID = UUID("12121212-1212-4212-8212-121212121212")
 CORRELATION_ID = UUID("34343434-3434-4434-8434-343434343434")
 IDEMPOTENCY_KEY = UUID("56565656-5656-4656-8656-565656565656")
-ARTIFACT_ROOT = Path(os.environ.get("ARTIFACT_ROOT", "/data/outputs"))
+ARTIFACT_ROOT = Path(ARTIFACT_ROOT_VALUE or "/data/outputs")
 
 
 def _sha256(path: Path) -> str:
