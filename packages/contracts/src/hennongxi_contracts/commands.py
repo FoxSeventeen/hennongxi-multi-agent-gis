@@ -9,7 +9,7 @@ from uuid import UUID
 
 from pydantic import Field, FiniteFloat, model_validator
 
-from hennongxi_contracts.artifacts import ArtifactRef
+from hennongxi_contracts.artifacts import ArtifactRef, ArtifactStatus, ArtifactType
 from hennongxi_contracts.common import (
     ContractModel,
     Sha256Digest,
@@ -102,6 +102,8 @@ class AnalysisRunCommand(InternalCommand):
 
     @model_validator(mode="after")
     def require_complete_inputs(self) -> Self:
+        if self.step_id != "analyze_ndvi_change":
+            raise ValueError("analysis command requires the analyze_ndvi_change step")
         ids = tuple(asset.dataset_id for asset in self.inputs)
         if len(ids) != len(REQUIRED_DATASET_IDS) or set(ids) != REQUIRED_DATASET_IDS:
             raise ValueError("inputs must contain exactly the required logical dataset IDs")
@@ -122,10 +124,28 @@ class AnalysisRunResult(ContractModel):
     correlation_id: UUID
     artifacts: tuple[ArtifactRef, ...]
     statistics: AreaStatistics
+    elapsed_ms: int = Field(ge=0)
 
     @model_validator(mode="after")
     def require_artifact_scope(self) -> Self:
         _require_artifact_scope(self.task_id, self.attempt, self.artifacts)
+        required_types = {
+            ArtifactType.NDVI_BEFORE,
+            ArtifactType.NDVI_AFTER,
+            ArtifactType.NDVI_DIFFERENCE,
+            ArtifactType.CHANGE_CLASSIFICATION,
+            ArtifactType.AREA_STATISTICS,
+        }
+        if (
+            self.step_id != "analyze_ndvi_change"
+            or len(self.artifacts) != len(required_types)
+            or {artifact.artifact_type for artifact in self.artifacts} != required_types
+            or any(artifact.status is not ArtifactStatus.COMPLETE for artifact in self.artifacts)
+        ):
+            raise ValueError(
+                "analysis result requires the complete analysis artifact set for "
+                "the analyze_ndvi_change step"
+            )
         return self
 
 

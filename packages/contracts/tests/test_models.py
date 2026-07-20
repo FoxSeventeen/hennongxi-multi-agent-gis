@@ -7,6 +7,8 @@ import pytest
 from hennongxi_contracts import (
     AgentName,
     AnalysisRunCommand,
+    AnalysisRunResult,
+    AreaStatistics,
     ArtifactRef,
     ArtifactStatus,
     ArtifactType,
@@ -163,12 +165,17 @@ def test_complete_artifact_requires_checksum_and_nonzero_size() -> None:
         )
 
 
-def valid_artifact(*, task_id: UUID = TASK_ID, attempt: int = 1) -> ArtifactRef:
+def valid_artifact(
+    *,
+    task_id: UUID = TASK_ID,
+    attempt: int = 1,
+    artifact_type: ArtifactType = ArtifactType.NDVI_BEFORE,
+) -> ArtifactRef:
     return ArtifactRef(
         artifact_id=UUID("dddddddd-dddd-4ddd-8ddd-dddddddddddd"),
         task_id=task_id,
         attempt=attempt,
-        artifact_type=ArtifactType.NDVI_BEFORE,
+        artifact_type=artifact_type,
         status=ArtifactStatus.COMPLETE,
         media_type="image/tiff",
         created_at=NOW,
@@ -332,6 +339,64 @@ def test_internal_command_rejects_an_arbitrary_input_path() -> None:
                 "inputs": [],
                 "input_path": "/tmp/user-controlled.tif",
             }
+        )
+
+
+def test_analysis_command_is_scoped_to_the_analysis_step() -> None:
+    with pytest.raises(ValidationError, match="analyze_ndvi_change"):
+        AnalysisRunCommand(
+            task_id=TASK_ID,
+            step_id="prepare_data",
+            attempt=1,
+            correlation_id=CORRELATION_ID,
+            inputs=(),
+        )
+
+
+def test_analysis_result_requires_elapsed_time_and_complete_artifact_set() -> None:
+    artifacts = tuple(
+        valid_artifact(artifact_type=artifact_type)
+        for artifact_type in (
+            ArtifactType.NDVI_BEFORE,
+            ArtifactType.NDVI_AFTER,
+            ArtifactType.NDVI_DIFFERENCE,
+            ArtifactType.CHANGE_CLASSIFICATION,
+            ArtifactType.AREA_STATISTICS,
+        )
+    )
+    result = AnalysisRunResult(
+        task_id=TASK_ID,
+        step_id="analyze_ndvi_change",
+        attempt=1,
+        correlation_id=CORRELATION_ID,
+        artifacts=artifacts,
+        statistics=AreaStatistics(
+            increase_hectares=1,
+            stable_hectares=2,
+            decrease_hectares=3,
+            valid_hectares=6,
+        ),
+        elapsed_ms=25,
+    )
+
+    assert result.elapsed_ms == 25
+
+
+def test_analysis_result_rejects_incomplete_artifact_set() -> None:
+    with pytest.raises(ValidationError, match="complete analysis artifact set"):
+        AnalysisRunResult(
+            task_id=TASK_ID,
+            step_id="analyze_ndvi_change",
+            attempt=1,
+            correlation_id=CORRELATION_ID,
+            artifacts=(valid_artifact(),),
+            statistics=AreaStatistics(
+                increase_hectares=1,
+                stable_hectares=2,
+                decrease_hectares=3,
+                valid_hectares=6,
+            ),
+            elapsed_ms=25,
         )
 
 

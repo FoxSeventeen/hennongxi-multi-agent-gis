@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Annotated, NoReturn
 from uuid import UUID
 
-from fastapi import Body, FastAPI, Path
+from fastapi import Body, FastAPI, Header, Path
 from fastapi.responses import Response
 
 from hennongxi_contracts.artifacts import TileArtifactType
@@ -204,7 +204,10 @@ def create_contract_app() -> FastAPI:
         response_model=AnalysisRunResult,
         responses=_errors(409, 422, 503),
     )
-    def run_analysis(command: Annotated[AnalysisRunCommand, Body()]) -> AnalysisRunResult:
+    def run_analysis(
+        command: Annotated[AnalysisRunCommand, Body()],
+        idempotency_key: Annotated[UUID, Header(alias="Idempotency-Key")],
+    ) -> AnalysisRunResult:
         _not_implemented()
 
     @app.post(

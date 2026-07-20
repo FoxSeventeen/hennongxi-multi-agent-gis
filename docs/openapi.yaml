@@ -343,12 +343,20 @@ paths:
       - Internal Agent
       summary: Run Analysis
       operationId: runAnalysis
+      parameters:
+      - name: Idempotency-Key
+        in: header
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Idempotency-Key
       requestBody:
+        required: true
         content:
           application/json:
             schema:
               $ref: '#/components/schemas/AnalysisRunCommand'
-        required: true
       responses:
         '200':
           description: Successful Response
@@ -526,6 +534,10 @@ components:
           title: Artifacts
         statistics:
           $ref: '#/components/schemas/AreaStatistics'
+        elapsed_ms:
+          type: integer
+          minimum: 0.0
+          title: Elapsed Ms
       additionalProperties: false
       type: object
       required:
@@ -535,6 +547,7 @@ components:
       - correlation_id
       - artifacts
       - statistics
+      - elapsed_ms
       title: AnalysisRunResult
     AreaStatistics:
       properties:

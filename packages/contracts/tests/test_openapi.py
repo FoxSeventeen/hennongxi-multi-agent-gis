@@ -69,3 +69,19 @@ def test_publisher_resource_routes_are_read_only() -> None:
         if path.startswith("/api/v1/tiles/") or path.endswith("/download"):
             operations = set(paths[path]) - {"parameters"}
             assert operations == {"get"}
+
+
+def test_analysis_route_requires_idempotency_header_and_returns_timing() -> None:
+    document = load_checked_in_openapi()
+    operation = document["paths"]["/internal/v1/analysis/run"]["post"]
+
+    header = next(
+        parameter
+        for parameter in operation["parameters"]
+        if parameter["name"] == "Idempotency-Key"
+    )
+    assert header["in"] == "header"
+    assert header["required"] is True
+
+    result_schema = document["components"]["schemas"]["AnalysisRunResult"]
+    assert "elapsed_ms" in result_schema["required"]
