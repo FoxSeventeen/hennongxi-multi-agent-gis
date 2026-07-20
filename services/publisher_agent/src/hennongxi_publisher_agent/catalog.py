@@ -65,6 +65,8 @@ class ResolvedPublication:
     attempt: int
     correlation_id: UUID
     tiles: tuple[ResolvedTile, ...]
+    analysis: AnalysisRunResult
+    quality: QualityEvaluateResult
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,6 +75,7 @@ class _VerifiedAttempt:
     paths: dict[TileArtifactType, Path]
     artifacts: dict[TileArtifactType, ArtifactRef]
     input_artifacts: tuple[ArtifactRef, ...]
+    analysis: AnalysisRunResult
     quality: QualityEvaluateResult
     _fingerprints: tuple[_FileFingerprint, ...] = field(
         repr=False,
@@ -116,6 +119,8 @@ class PublisherArtifactCatalog:
                 tiles=tuple(
                     _resolved_tile(verified, artifact_type) for artifact_type in TileArtifactType
                 ),
+                analysis=verified.analysis,
+                quality=verified.quality,
             )
 
     def _verified_attempt(self, task_id: UUID) -> _VerifiedAttempt:
@@ -211,6 +216,7 @@ class PublisherArtifactCatalog:
                 paths=paths,
                 artifacts=artifacts,
                 input_artifacts=(*analysis.artifacts, quality.artifact),
+                analysis=analysis,
                 quality=quality,
                 _fingerprints=(
                     *analysis_fingerprints,

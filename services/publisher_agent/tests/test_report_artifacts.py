@@ -10,6 +10,7 @@ from hennongxi_contracts import ArtifactStatus, ArtifactType
 from hennongxi_publisher_agent.report_artifacts import (
     ReportArtifactConflictError,
     ReportArtifactIntegrityError,
+    ReportArtifactNotFoundError,
     ReportArtifactStore,
 )
 
@@ -77,6 +78,26 @@ def test_report_store_reverifies_and_reuses_same_idempotency_key(tmp_path: Path)
     assert second.path.stat().st_mtime_ns == modified_ns
 
 
+def test_report_store_reads_only_matching_task_and_artifact_bytes(tmp_path: Path) -> None:
+    store = ReportArtifactStore(tmp_path)
+    published = store.publish(
+        task_id=TASK_ID,
+        attempt=1,
+        idempotency_key=IDEMPOTENCY_KEY,
+        created_at=CREATED_AT,
+        payload=PDF_PAYLOAD,
+    )
+
+    download = store.read(TASK_ID, published.artifact.artifact_id)
+
+    assert download.artifact == published.artifact
+    assert download.payload == PDF_PAYLOAD
+    with pytest.raises(ReportArtifactNotFoundError, match="was not found"):
+        store.read(UUID("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"), published.artifact.artifact_id)
+    with pytest.raises(ReportArtifactNotFoundError, match="was not found"):
+        store.read(TASK_ID, UUID("ffffffff-ffff-4fff-8fff-ffffffffffff"))
+
+
 def test_report_store_rejects_conflict_and_visible_corruption(tmp_path: Path) -> None:
     store = ReportArtifactStore(tmp_path)
     first = store.publish(
@@ -105,6 +126,8 @@ def test_report_store_rejects_conflict_and_visible_corruption(tmp_path: Path) ->
             created_at=CREATED_AT,
             payload=PDF_PAYLOAD,
         )
+    with pytest.raises(ReportArtifactIntegrityError, match="published PDF report is invalid"):
+        store.read(TASK_ID, first.artifact.artifact_id)
     assert first.path.read_bytes() == b"corrupted"
 
 

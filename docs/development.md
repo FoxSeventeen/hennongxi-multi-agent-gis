@@ -213,15 +213,16 @@ docker compose run --rm --no-deps \
 
 第二条命令通过真实私网依次调用 Data、Analysis 和 Quality，并重复 Quality 请求验证幂等复用；随后从独立报告卷读取 JSON，核对 task 作用域、指标内容、字节数和 SHA-256。使用修正后的 2019-08-19/2024-08-12 Sentinel-2 缓存时，验收结果为覆盖率 `1.0000`、有效像元率约 `0.9312`、输出完整性 `5/5`、结论 `PASS`。
 
-## Publisher 瓦片与图层元数据验证
+## Publisher 瓦片、图层元数据与 PDF 报告验证
 
-Publisher 的公共只读路由为
-`GET /api/v1/tiles/{task_id}/{artifact_type}/{z}/{x}/{y}.png`，内部编排路由为
-`POST /internal/v1/publisher/publish`。前者只接受任务 ID、四种固定成果类型和合法 XYZ，
-返回带 ETag、短期缓存和 `nosniff` 头的 256×256 PNG；后者重新核对同一任务/尝试的
-Analysis 与 Quality 收据、质量 PASS、字节数和 SHA-256，然后从批准的 G2 清单及真实
-栅格生成四个图层的日期、WGS84 边界、单位、中文图例和 Copernicus 数据归属。两个
-路由都不会接收或返回本地存储路径。
+Publisher 的公共只读路由为瓦片路由
+`GET /api/v1/tiles/{task_id}/{artifact_type}/{z}/{x}/{y}.png` 和任务绑定下载路由
+`GET /api/v1/tasks/{task_id}/artifacts/{artifact_id}/download`；内部编排路由为
+`POST /internal/v1/publisher/publish`，必须提供 `Idempotency-Key` 和匹配命令的
+`X-Correlation-ID`。发布命令重新核对同一任务/尝试的 Analysis 与 Quality 收据、质量
+PASS、字节数和 SHA-256，然后生成四个图层元数据及一个原子写入的中文 PDF。下载时
+再次核对任务、成果 ID、字节数和 SHA-256，并返回安全 ASCII 文件名、`application/pdf`、
+`no-store` 和 `nosniff` 响应头。任何路由都不会接收或返回本地存储路径。
 
 服务回归和真实 G2 网络验收分别执行：
 
@@ -237,6 +238,7 @@ docker compose run --rm --no-deps \
 ```
 
 第二条命令要求已有真实 T11 成果并已启动 Publisher。当前批准数据的验收结果为
-`2 passed`：一项断言 PNG 尺寸、透明度和固定颜色，另一项断言四个资源使用
+`2 passed`：一项断言 PNG 尺寸、透明度和固定颜色；另一项断言四个图层资源使用
 2019-08-19/2024-08-12 日期、真实 WGS84 边界、匹配单位/图例和修改后 Copernicus
-Sentinel 数据归属。
+Sentinel 数据归属，并通过公共路由下载、解析同任务的中文 PDF。PDF 的自动测试还会
+执行 pypdf 文本提取和 Poppler 两页 A4 渲染；真实 G2 报告需在 `tmp/pdfs/` 中逐页检查。

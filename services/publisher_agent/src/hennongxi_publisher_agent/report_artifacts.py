@@ -6,6 +6,7 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 import shutil
 from dataclasses import dataclass
 from datetime import datetime
@@ -17,6 +18,7 @@ from pydantic import ValidationError
 
 _REPORT_FILENAME = "report.pdf"
 _RECEIPT_FILENAME = "report_result.json"
+_ATTEMPT_PATTERN = re.compile(r"^attempt-([1-9][0-9]*)$")
 
 
 class ReportArtifactConflictError(RuntimeError):
@@ -27,11 +29,21 @@ class ReportArtifactIntegrityError(RuntimeError):
     """Raised when a staged or published report cannot be verified."""
 
 
+class ReportArtifactNotFoundError(LookupError):
+    """Raised when a task does not own the requested report artifact."""
+
+
 @dataclass(frozen=True, slots=True)
 class ReportArtifactOutcome:
     artifact: ArtifactRef
     path: Path
     reused: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ReportArtifactDownload:
+    artifact: ArtifactRef
+    payload: bytes
 
 
 class ReportArtifactStore:
@@ -44,6 +56,48 @@ class ReportArtifactStore:
         if attempt < 1:
             raise ValueError("attempt must be positive")
         return self._artifact_root / str(task_id) / f"attempt-{attempt}" / "publisher"
+
+    def read(self, task_id: UUID, artifact_id: UUID) -> ReportArtifactDownload:
+        task_directory = self._artifact_root / str(task_id)
+        if not task_directory.exists():
+            raise ReportArtifactNotFoundError("task-bound PDF report was not found")
+        _require_real_directory(self._artifact_root)
+        _require_real_directory(task_directory)
+        try:
+            candidates = sorted(
+                (
+                    (int(match.group(1)), path)
+                    for path in task_directory.iterdir()
+                    if (match := _ATTEMPT_PATTERN.fullmatch(path.name)) is not None
+                ),
+                reverse=True,
+            )
+        except OSError as error:
+            raise ReportArtifactIntegrityError("published PDF report is invalid") from error
+
+        for attempt, attempt_directory in candidates:
+            _require_real_directory(attempt_directory)
+            directory = attempt_directory / "publisher"
+            if directory.is_symlink():
+                raise ReportArtifactIntegrityError("published PDF report is invalid")
+            if not directory.exists():
+                continue
+            _stored_key, artifact = self._load_verified(directory, task_id, attempt)
+            if artifact.artifact_id != artifact_id:
+                continue
+            try:
+                payload = (directory / _REPORT_FILENAME).read_bytes()
+            except OSError as error:
+                raise ReportArtifactIntegrityError("published PDF report is invalid") from error
+            if (
+                not _looks_like_pdf(payload)
+                or len(payload) != artifact.byte_size
+                or hashlib.sha256(payload).hexdigest() != artifact.checksum_sha256
+            ):
+                raise ReportArtifactIntegrityError("published PDF report is invalid")
+            return ReportArtifactDownload(artifact=artifact, payload=payload)
+
+        raise ReportArtifactNotFoundError("task-bound PDF report was not found")
 
     def publish(
         self,
@@ -225,9 +279,7 @@ class ReportArtifactStore:
 
 def _looks_like_pdf(payload: bytes) -> bool:
     return (
-        len(payload) > 16
-        and payload.startswith(b"%PDF-")
-        and payload.rstrip().endswith(b"%%EOF")
+        len(payload) > 16 and payload.startswith(b"%PDF-") and payload.rstrip().endswith(b"%%EOF")
     )
 
 

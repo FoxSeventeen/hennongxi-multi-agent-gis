@@ -17,6 +17,7 @@ from hennongxi_contracts import (
     TileArtifactType,
 )
 from PIL import Image
+from pypdf import PdfReader
 from rio_tiler.io import Reader
 
 PUBLISHER_AGENT_BASE_URL = os.environ.get("PUBLISHER_AGENT_BASE_URL")
@@ -35,6 +36,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 TASK_ID = UUID("68686868-6868-4868-8868-686868686868")
+PUBLISH_IDEMPOTENCY_KEY = UUID("dddddddd-dddd-4ddd-8ddd-dddddddddddd")
 ARTIFACT_ROOT = Path(ARTIFACT_ROOT_VALUE or "/data/outputs")
 QUALITY_REPORT_ROOT = Path(QUALITY_REPORT_ROOT_VALUE or "/data/quality-reports")
 NDVI_COLORS = {
@@ -111,15 +113,22 @@ def test_real_receipts_publish_complete_browser_layer_metadata() -> None:
     response = httpx.post(
         f"{PUBLISHER_AGENT_BASE_URL}/internal/v1/publisher/publish",
         json=command.model_dump(mode="json"),
-        headers={"X-Correlation-ID": str(command.correlation_id)},
+        headers={
+            "X-Correlation-ID": str(command.correlation_id),
+            "Idempotency-Key": str(PUBLISH_IDEMPOTENCY_KEY),
+        },
         timeout=30,
     )
 
     response.raise_for_status()
     result = PublisherPublishResult.model_validate(response.json())
-    assert result.report is None
-    assert len(result.resources) == 4
-    resources = {resource.tile_metadata.artifact_type: resource for resource in result.resources}
+    assert result.report.artifact_type.value == "PDF_REPORT"
+    assert len(result.resources) == 5
+    resources = {
+        resource.tile_metadata.artifact_type: resource
+        for resource in result.resources
+        if resource.tile_metadata is not None
+    }
     assert set(resources) == set(TileArtifactType)
     assert resources[TileArtifactType.NDVI_BEFORE].tile_metadata.start_date.isoformat() == (
         "2019-08-19"
@@ -137,3 +146,22 @@ def test_real_receipts_publish_complete_browser_layer_metadata() -> None:
     assert "修改" in difference.attribution
     assert "Copernicus" in difference.attribution
     assert difference.legend
+
+    report_resource = next(
+        resource for resource in result.resources if resource.download_path is not None
+    )
+    assert report_resource.artifact_id == result.report.artifact_id
+    download = httpx.get(
+        f"{PUBLISHER_AGENT_BASE_URL}{report_resource.download_path}",
+        timeout=30,
+    )
+    download.raise_for_status()
+    assert download.headers["content-type"] == "application/pdf"
+    assert download.headers["content-disposition"].startswith("attachment;")
+    report_text = "\n".join(
+        page.extract_text() or "" for page in PdfReader(io.BytesIO(download.content)).pages
+    )
+    assert str(TASK_ID) in report_text
+    assert "2019-08-19" in report_text
+    assert "2024-08-12" in report_text
+    assert "结论 PASS" in report_text

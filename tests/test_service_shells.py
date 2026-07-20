@@ -54,6 +54,7 @@ def test_each_agent_exposes_only_its_approved_health_routes(
     if service_name == "publisher":
         expected_paths |= {
             "/api/v1/tiles/{task_id}/{artifact_type}/{z}/{x}/{y}.png",
+            "/api/v1/tasks/{task_id}/artifacts/{artifact_id}/download",
             "/internal/v1/publisher/publish",
         }
     assert application_paths == expected_paths

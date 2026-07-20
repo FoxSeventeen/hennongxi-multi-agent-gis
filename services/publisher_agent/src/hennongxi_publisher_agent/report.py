@@ -183,9 +183,10 @@ def _validate_content(content: ReportContent) -> None:
     if not content.attribution.strip():
         raise ReportInputError("report attribution is required")
     artifact_types = tuple(artifact.artifact_type for artifact in content.artifacts)
-    if len(artifact_types) != len(_REQUIRED_ARTIFACT_TYPES) or set(
-        artifact_types
-    ) != _REQUIRED_ARTIFACT_TYPES:
+    if (
+        len(artifact_types) != len(_REQUIRED_ARTIFACT_TYPES)
+        or set(artifact_types) != _REQUIRED_ARTIFACT_TYPES
+    ):
         raise ReportInputError("report requires the complete verified artifact set")
     if any(
         artifact.task_id != content.task_id or artifact.attempt != content.attempt
@@ -208,9 +209,7 @@ def _register_font() -> None:
     with _FONT_LOCK:
         if _FONT_REGISTERED:
             return
-        resource = files("hennongxi_publisher_agent").joinpath(
-            "assets/fonts/NotoSansSC-VF.ttf"
-        )
+        resource = files("hennongxi_publisher_agent").joinpath("assets/fonts/NotoSansSC-VF.ttf")
         with as_file(resource) as path:
             pdfmetrics.registerFont(TTFont(_FONT_NAME, str(path)))
         _FONT_REGISTERED = True
@@ -332,10 +331,7 @@ def _plan_table(styles: dict[str, ParagraphStyle]) -> Table:
     rows = [["序号", "执行 Agent", "受约束步骤"]]
     rows.extend([order, agent, description] for order, agent, description in _PLAN)
     table = Table(
-        [
-            [Paragraph(_safe(value), styles["table"]) for value in row]
-            for row in rows
-        ],
+        [[Paragraph(_safe(value), styles["table"]) for value in row] for row in rows],
         colWidths=[13 * mm, 37 * mm, 124 * mm],
         repeatRows=1,
     )

@@ -439,16 +439,16 @@ The critical path is contracts → persistence/events → raster chain → orche
 
 **验收标准：**
 
-- [ ] 完整夹具生成任务绑定 PDF，中文可读、没有缺字方框，并包含全部必需指标与结论。
-- [ ] 下载路由只提供请求任务已登记的报告，并返回安全文件名和内容响应头。
-- [ ] 缺失或不完整输入显式失败，不得生成看似成功的报告。
+- [x] 完整夹具生成任务绑定 PDF，中文可读、没有缺字方框，并包含全部必需指标与结论。
+- [x] 下载路由只提供请求任务已登记的报告，并返回安全文件名和内容响应头。
+- [x] 缺失或不完整输入显式失败，不得生成看似成功的报告。
 
 **验证：**
 
 - [x] 已固定 Noto CJK 官方提交 `f8d157532fbfaeda587e826d4cd5b21a49186f7c` 的
   简体中文子集 TTF，记录字体/许可证 SHA-256，并验证关键中文字符和非 editable 镜像安装包。
-- [ ] `docker compose run --rm publisher-agent pytest services/publisher_agent/tests -q -k report`
-- [ ] PDF 文本提取与页面渲染图像检查通过。
+- [x] `docker compose run --rm publisher-agent pytest services/publisher_agent/tests -q -k report`
+- [x] PDF 文本提取与页面渲染图像检查通过；真实 G2 报告为两页 A4，逐页无缺字、截断、重叠或空白孤页。
 
 **依赖：** T11、T12，以及已批准的 Publisher 下载路由。
 

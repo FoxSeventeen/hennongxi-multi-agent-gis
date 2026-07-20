@@ -9,8 +9,8 @@ from typing import Annotated, cast
 from uuid import UUID
 
 import structlog
+from fastapi import Header, Request
 from fastapi import Path as ApiPath
-from fastapi import Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
@@ -36,6 +36,12 @@ from hennongxi_publisher_agent.publication import (
     PublicationConfigurationError,
     PublicationService,
 )
+from hennongxi_publisher_agent.report_artifacts import (
+    ReportArtifactConflictError,
+    ReportArtifactIntegrityError,
+    ReportArtifactNotFoundError,
+    ReportArtifactStore,
+)
 from hennongxi_publisher_agent.tiles import (
     TileCoordinateError,
     TileOutsideSourceError,
@@ -51,15 +57,19 @@ app.add_middleware(
     allow_methods=["GET"],
     allow_headers=["X-Correlation-ID"],
 )
+_artifact_root = Path(os.environ.get("ARTIFACT_ROOT", "/data/outputs"))
 _catalog = PublisherArtifactCatalog(
-    Path(os.environ.get("ARTIFACT_ROOT", "/data/outputs")),
+    _artifact_root,
     Path(os.environ.get("QUALITY_REPORT_ROOT", "/data/quality-reports")),
 )
+_report_store = ReportArtifactStore(_artifact_root)
 app.state.publisher_catalog = _catalog
 app.state.tile_renderer = TileRenderer()
+app.state.report_store = _report_store
 app.state.publication_service = PublicationService(
     _catalog,
     Path(os.environ.get("DATA_MANIFEST_PATH", "/app/data/manifest.json")),
+    _report_store,
 )
 _logger = structlog.get_logger("hennongxi.publisher")
 
@@ -92,6 +102,22 @@ class _PublicationServiceFailure(RuntimeError):
         self.status_code = status_code
         self.response = response
         self.command = command
+
+
+class _ReportServiceFailure(RuntimeError):
+    def __init__(
+        self,
+        *,
+        status_code: int,
+        response: ErrorResponse,
+        task_id: UUID,
+        artifact_id: UUID,
+    ) -> None:
+        super().__init__(response.error.code.value)
+        self.status_code = status_code
+        self.response = response
+        self.task_id = task_id
+        self.artifact_id = artifact_id
 
 
 def _failure(
@@ -152,6 +178,29 @@ def _publication_failure(
             )
         ),
         command=command,
+    )
+
+
+def _report_failure(
+    *,
+    status_code: int,
+    code: ErrorCode,
+    message: str,
+    retryable: bool,
+    task_id: UUID,
+    artifact_id: UUID,
+) -> _ReportServiceFailure:
+    return _ReportServiceFailure(
+        status_code=status_code,
+        response=ErrorResponse(
+            error=StructuredError(
+                code=code,
+                message=message,
+                retryable=retryable,
+            )
+        ),
+        task_id=task_id,
+        artifact_id=artifact_id,
     )
 
 
@@ -227,6 +276,24 @@ async def publication_service_failure_handler(
     )
 
 
+@app.exception_handler(_ReportServiceFailure)
+async def report_service_failure_handler(
+    _request: Request,
+    error: _ReportServiceFailure,
+) -> JSONResponse:
+    _logger.warning(
+        "publisher_report_failed",
+        task_id=str(error.task_id),
+        artifact_id=str(error.artifact_id),
+        error_code=error.response.error.code.value,
+        retryable=error.response.error.retryable,
+    )
+    return JSONResponse(
+        status_code=error.status_code,
+        content=error.response.model_dump(mode="json"),
+    )
+
+
 @app.exception_handler(Exception)
 async def unexpected_publisher_failure_handler(
     _request: Request,
@@ -255,12 +322,25 @@ async def unexpected_publisher_failure_handler(
         503: {"model": ErrorResponse},
     },
 )
-def publish_results(command: PublisherPublishCommand) -> PublisherPublishResult:
+def publish_results(
+    command: PublisherPublishCommand,
+    idempotency_key: Annotated[UUID, Header(alias="Idempotency-Key")],
+    correlation_id: Annotated[UUID, Header(alias="X-Correlation-ID")],
+) -> PublisherPublishResult:
     """Return browser resource metadata only after independent receipt verification."""
+
+    if correlation_id != command.correlation_id:
+        raise _publication_failure(
+            command,
+            status_code=422,
+            code=ErrorCode.VALIDATION_ERROR,
+            message="correlation header does not match the publisher command",
+            retryable=False,
+        )
 
     service = cast(PublicationService, app.state.publication_service)
     try:
-        result = service.publish(command)
+        result = service.publish(command, idempotency_key)
     except (
         PublishedTileIntegrityError,
         PublishedTileNotFoundError,
@@ -273,12 +353,36 @@ def publish_results(command: PublisherPublishCommand) -> PublisherPublishResult:
             message="publishable artifacts failed integrity validation",
             retryable=True,
         ) from error
+    except ReportArtifactConflictError as error:
+        raise _publication_failure(
+            command,
+            status_code=409,
+            code=ErrorCode.CONFLICT,
+            message="publisher attempt conflicts with an existing report",
+            retryable=False,
+        ) from error
+    except ReportArtifactIntegrityError as error:
+        raise _publication_failure(
+            command,
+            status_code=409,
+            code=ErrorCode.PUBLISHING_FAILED,
+            message="published PDF report failed integrity validation",
+            retryable=True,
+        ) from error
     except PublicationConfigurationError as error:
         raise _publication_failure(
             command,
             status_code=503,
             code=ErrorCode.DEPENDENCY_UNAVAILABLE,
             message="approved publication source metadata is unavailable",
+            retryable=True,
+        ) from error
+    except OSError as error:
+        raise _publication_failure(
+            command,
+            status_code=503,
+            code=ErrorCode.DEPENDENCY_UNAVAILABLE,
+            message="publisher report storage is unavailable",
             retryable=True,
         ) from error
 
@@ -289,6 +393,7 @@ def publish_results(command: PublisherPublishCommand) -> PublisherPublishResult:
         attempt=command.attempt,
         correlation_id=str(command.correlation_id),
         resource_count=len(result.resources),
+        report_artifact_id=str(result.report.artifact_id),
     )
     return result
 
@@ -364,6 +469,65 @@ def get_artifact_tile(
         headers={
             "Cache-Control": "public, max-age=60, must-revalidate",
             "ETag": f'"{resolved.artifact.checksum_sha256}"',
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@app.get(
+    "/api/v1/tasks/{task_id}/artifacts/{artifact_id}/download",
+    response_class=Response,
+    responses={
+        404: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+        422: {"model": ErrorResponse},
+    },
+)
+def download_artifact(
+    task_id: Annotated[UUID, ApiPath()],
+    artifact_id: Annotated[UUID, ApiPath()],
+) -> Response:
+    """Return only a checksum-reverified PDF registered to the requested task."""
+
+    started = perf_counter()
+    store = cast(ReportArtifactStore, app.state.report_store)
+    try:
+        report = store.read(task_id, artifact_id)
+    except ReportArtifactNotFoundError as error:
+        raise _report_failure(
+            status_code=404,
+            code=ErrorCode.TASK_NOT_FOUND,
+            message="task-bound PDF report was not found",
+            retryable=False,
+            task_id=task_id,
+            artifact_id=artifact_id,
+        ) from error
+    except ReportArtifactIntegrityError as error:
+        raise _report_failure(
+            status_code=409,
+            code=ErrorCode.PUBLISHING_FAILED,
+            message="published PDF report failed integrity validation",
+            retryable=True,
+            task_id=task_id,
+            artifact_id=artifact_id,
+        ) from error
+
+    elapsed_ms = max(0, round((perf_counter() - started) * 1_000))
+    _logger.info(
+        "publisher_report_served",
+        task_id=str(task_id),
+        artifact_id=str(report.artifact.artifact_id),
+        attempt=report.artifact.attempt,
+        byte_size=report.artifact.byte_size,
+        elapsed_ms=elapsed_ms,
+    )
+    return Response(
+        content=report.payload,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": (f'attachment; filename="hennongxi-{task_id}-report.pdf"'),
+            "Cache-Control": "private, no-store",
+            "ETag": f'"{report.artifact.checksum_sha256}"',
             "X-Content-Type-Options": "nosniff",
         },
     )

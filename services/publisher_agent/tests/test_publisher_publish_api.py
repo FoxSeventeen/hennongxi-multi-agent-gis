@@ -32,11 +32,16 @@ from hennongxi_publisher_agent.publication import (
     PublicationArtifactError,
     PublicationConfigurationError,
 )
+from hennongxi_publisher_agent.report_artifacts import (
+    ReportArtifactConflictError,
+    ReportArtifactIntegrityError,
+)
 from hennongxi_publisher_agent.tiles import style_for
 from structlog.testing import capture_logs
 
 TASK_ID = UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
 CORRELATION_ID = UUID("cccccccc-cccc-4ccc-8ccc-cccccccccccc")
+IDEMPOTENCY_KEY = UUID("dddddddd-dddd-4ddd-8ddd-dddddddddddd")
 NOW = datetime(2026, 7, 20, 8, 0, tzinfo=UTC)
 
 
@@ -120,12 +125,30 @@ def _result() -> PublisherPublishResult:
                 ),
             )
         )
+    report = ArtifactRef(
+        artifact_id=uuid5(TASK_ID, "publisher:1:PDF_REPORT"),
+        task_id=TASK_ID,
+        attempt=1,
+        artifact_type=ArtifactType.PDF_REPORT,
+        status=ArtifactStatus.COMPLETE,
+        media_type="application/pdf",
+        created_at=NOW,
+        checksum_sha256="f" * 64,
+        byte_size=200,
+    )
+    resources.append(
+        PublishedResource(
+            artifact_id=report.artifact_id,
+            download_path=f"/api/v1/tasks/{TASK_ID}/artifacts/{report.artifact_id}/download",
+        )
+    )
     return PublisherPublishResult(
         task_id=TASK_ID,
         step_id="publish_results",
         attempt=1,
         correlation_id=CORRELATION_ID,
         resources=tuple(resources),
+        report=report,
     )
 
 
@@ -133,7 +156,11 @@ class _PublicationService:
     def __init__(self, outcome: PublisherPublishResult | Exception) -> None:
         self._outcome = outcome
 
-    def publish(self, _command: PublisherPublishCommand) -> PublisherPublishResult:
+    def publish(
+        self,
+        _command: PublisherPublishCommand,
+        _idempotency_key: UUID,
+    ) -> PublisherPublishResult:
         if isinstance(self._outcome, Exception):
             raise self._outcome
         return self._outcome
@@ -159,7 +186,10 @@ def test_publish_route_returns_task_bound_metadata_and_correlated_log(
         response = client.post(
             "/internal/v1/publisher/publish",
             json=_command().model_dump(mode="json"),
-            headers={CORRELATION_ID_HEADER: str(CORRELATION_ID)},
+            headers={
+                CORRELATION_ID_HEADER: str(CORRELATION_ID),
+                "Idempotency-Key": str(IDEMPOTENCY_KEY),
+            },
         )
 
     assert response.status_code == 200
@@ -168,7 +198,8 @@ def test_publish_route_returns_task_bound_metadata_and_correlated_log(
     assert response.headers[CORRELATION_ID_HEADER] == str(CORRELATION_ID)
     published = next(log for log in logs if log["event"] == "publisher_metadata_published")
     assert published["task_id"] == str(TASK_ID)
-    assert published["resource_count"] == 4
+    assert published["resource_count"] == 5
+    assert published["report_artifact_id"] == str(_result().report.artifact_id)
     assert "/data/" not in str(logs)
 
 
@@ -178,6 +209,8 @@ def test_publish_route_returns_task_bound_metadata_and_correlated_log(
         (PublishedTileIntegrityError("private /data/output"), 409, ErrorCode.PUBLISHING_FAILED),
         (PublishedTileNotFoundError("private /data/output"), 409, ErrorCode.PUBLISHING_FAILED),
         (PublicationArtifactError("private /data/output"), 409, ErrorCode.PUBLISHING_FAILED),
+        (ReportArtifactIntegrityError("private /data/output"), 409, ErrorCode.PUBLISHING_FAILED),
+        (ReportArtifactConflictError("private /data/output"), 409, ErrorCode.CONFLICT),
         (
             PublicationConfigurationError("private /app/data/manifest.json"),
             503,
@@ -196,6 +229,10 @@ def test_publish_route_maps_expected_failures_without_private_details(
         response = client.post(
             "/internal/v1/publisher/publish",
             json=_command().model_dump(mode="json"),
+            headers={
+                CORRELATION_ID_HEADER: str(CORRELATION_ID),
+                "Idempotency-Key": str(IDEMPOTENCY_KEY),
+            },
         )
 
     error = ErrorResponse.model_validate(response.json())
@@ -204,3 +241,26 @@ def test_publish_route_maps_expected_failures_without_private_details(
     assert "private" not in response.text
     assert "/data/" not in response.text
     assert "/app/" not in response.text
+
+
+def test_publish_route_requires_matching_correlation_and_idempotency_headers(
+    configured_app: FastAPI,
+) -> None:
+    with TestClient(configured_app) as client:
+        missing = client.post(
+            "/internal/v1/publisher/publish",
+            json=_command().model_dump(mode="json"),
+        )
+        mismatched = client.post(
+            "/internal/v1/publisher/publish",
+            json=_command().model_dump(mode="json"),
+            headers={
+                CORRELATION_ID_HEADER: str(UUID("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee")),
+                "Idempotency-Key": str(IDEMPOTENCY_KEY),
+            },
+        )
+
+    assert missing.status_code == 422
+    assert mismatched.status_code == 422
+    assert ErrorResponse.model_validate(missing.json()).error.code is ErrorCode.VALIDATION_ERROR
+    assert ErrorResponse.model_validate(mismatched.json()).error.code is ErrorCode.VALIDATION_ERROR

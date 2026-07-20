@@ -271,7 +271,7 @@ paths:
         '200':
           description: Successful Response
           content:
-            application/octet-stream:
+            application/pdf:
               schema:
                 type: string
         '404':
@@ -465,12 +465,27 @@ paths:
       - Internal Agent
       summary: Publish Results
       operationId: publishResults
+      parameters:
+      - name: Idempotency-Key
+        in: header
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Idempotency-Key
+      - name: X-Correlation-ID
+        in: header
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: X-Correlation-Id
       requestBody:
+        required: true
         content:
           application/json:
             schema:
               $ref: '#/components/schemas/PublisherPublishCommand'
-        required: true
       responses:
         '200':
           description: Successful Response
@@ -1178,9 +1193,7 @@ components:
           type: array
           title: Resources
         report:
-          anyOf:
-          - $ref: '#/components/schemas/ArtifactRef'
-          - type: 'null'
+          $ref: '#/components/schemas/ArtifactRef'
       additionalProperties: false
       type: object
       required:
@@ -1189,6 +1202,7 @@ components:
       - attempt
       - correlation_id
       - resources
+      - report
       title: PublisherPublishResult
     QualityConclusion:
       type: string

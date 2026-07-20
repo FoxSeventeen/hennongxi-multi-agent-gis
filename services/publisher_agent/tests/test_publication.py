@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, date, datetime
+from io import BytesIO
 from pathlib import Path
 from uuid import UUID, uuid5
 
@@ -9,11 +10,14 @@ import numpy as np
 import pytest
 import rasterio
 from hennongxi_contracts import (
+    AnalysisRunResult,
+    AreaStatistics,
     ArtifactRef,
     ArtifactStatus,
     ArtifactType,
     PublisherPublishCommand,
     QualityConclusion,
+    QualityEvaluateResult,
     QualityMetrics,
     QualityThresholds,
     TileArtifactType,
@@ -23,10 +27,13 @@ from hennongxi_publisher_agent.publication import (
     PublicationConfigurationError,
     PublicationService,
 )
+from hennongxi_publisher_agent.report_artifacts import ReportArtifactStore
+from pypdf import PdfReader
 from rasterio.transform import from_bounds
 
 TASK_ID = UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
 CORRELATION_ID = UUID("cccccccc-cccc-4ccc-8ccc-cccccccccccc")
+IDEMPOTENCY_KEY = UUID("dddddddd-dddd-4ddd-8ddd-dddddddddddd")
 NOW = datetime(2026, 7, 20, 8, 0, tzinfo=UTC)
 
 
@@ -154,22 +161,67 @@ class _Catalog:
         return self.publication
 
 
+def _resolved_publication(root: Path) -> ResolvedPublication:
+    analysis = AnalysisRunResult(
+        task_id=TASK_ID,
+        step_id="analyze_ndvi_change",
+        attempt=1,
+        correlation_id=CORRELATION_ID,
+        artifacts=tuple(
+            _artifact(artifact_type)
+            for artifact_type in (
+                ArtifactType.NDVI_BEFORE,
+                ArtifactType.NDVI_AFTER,
+                ArtifactType.NDVI_DIFFERENCE,
+                ArtifactType.CHANGE_CLASSIFICATION,
+                ArtifactType.AREA_STATISTICS,
+            )
+        ),
+        statistics=AreaStatistics(
+            increase_hectares=1.25,
+            stable_hectares=3.5,
+            decrease_hectares=0.75,
+            valid_hectares=5.5,
+        ),
+        elapsed_ms=20,
+    )
+    quality = QualityEvaluateResult(
+        task_id=TASK_ID,
+        step_id="evaluate_quality",
+        attempt=1,
+        correlation_id=CORRELATION_ID,
+        metrics=_quality(),
+        artifact=_artifact(ArtifactType.QUALITY_REPORT),
+    )
+    return ResolvedPublication(
+        attempt=1,
+        correlation_id=CORRELATION_ID,
+        tiles=_write_rasters(root),
+        analysis=analysis,
+        quality=quality,
+    )
+
+
 def test_publication_builds_four_task_bound_resources_from_manifest_and_rasters(
     tmp_path: Path,
 ) -> None:
     manifest_path = tmp_path / "manifest.json"
     _write_manifest(manifest_path)
-    publication = ResolvedPublication(
-        attempt=1,
-        correlation_id=CORRELATION_ID,
-        tiles=_write_rasters(tmp_path),
-    )
+    publication = _resolved_publication(tmp_path)
 
-    result = PublicationService(_Catalog(publication), manifest_path).publish(_command())
+    result = PublicationService(
+        _Catalog(publication),
+        manifest_path,
+        ReportArtifactStore(tmp_path / "outputs"),
+    ).publish(_command(), IDEMPOTENCY_KEY)
 
-    assert result.report is None
-    assert len(result.resources) == 4
-    resources = {resource.tile_metadata.artifact_type: resource for resource in result.resources}
+    assert result.report.artifact_type is ArtifactType.PDF_REPORT
+    assert len(result.resources) == 5
+    resources = {
+        resource.tile_metadata.artifact_type: resource
+        for resource in result.resources
+        if resource.tile_metadata is not None
+    }
     before = resources[TileArtifactType.NDVI_BEFORE]
     after = resources[TileArtifactType.NDVI_AFTER]
     difference = resources[TileArtifactType.NDVI_DIFFERENCE]
@@ -185,16 +237,27 @@ def test_publication_builds_four_task_bound_resources_from_manifest_and_rasters(
         assert resource.tile_template == (
             f"/api/v1/tiles/{TASK_ID}/{artifact_type.value}/{{z}}/{{x}}/{{y}}.png"
         )
+    download = next(resource for resource in result.resources if resource.download_path is not None)
+    assert download.artifact_id == result.report.artifact_id
+    assert download.download_path == (
+        f"/api/v1/tasks/{TASK_ID}/artifacts/{result.report.artifact_id}/download"
+    )
+    report_path = tmp_path / "outputs" / str(TASK_ID) / "attempt-1" / "publisher" / "report.pdf"
+    report_text = "\n".join(
+        page.extract_text() or "" for page in PdfReader(BytesIO(report_path.read_bytes())).pages
+    )
+    assert "增加 1.25 公顷" in report_text
+    assert "结论 PASS" in report_text
 
 
 def test_publication_rejects_incomplete_approved_source_metadata(tmp_path: Path) -> None:
     manifest_path = tmp_path / "manifest.json"
     _write_manifest(manifest_path, include_after=False)
-    publication = ResolvedPublication(
-        attempt=1,
-        correlation_id=CORRELATION_ID,
-        tiles=_write_rasters(tmp_path),
-    )
+    publication = _resolved_publication(tmp_path)
 
     with pytest.raises(PublicationConfigurationError, match="source metadata"):
-        PublicationService(_Catalog(publication), manifest_path).publish(_command())
+        PublicationService(
+            _Catalog(publication),
+            manifest_path,
+            ReportArtifactStore(tmp_path / "outputs"),
+        ).publish(_command(), IDEMPOTENCY_KEY)

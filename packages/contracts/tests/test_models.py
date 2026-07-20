@@ -683,19 +683,42 @@ def _published_tile_resources() -> tuple[PublishedResource, ...]:
     return tuple(resources)
 
 
-def test_publisher_result_requires_four_tiles_but_allows_report_to_land_in_t13() -> None:
+def _published_report() -> ArtifactRef:
+    return valid_artifact(artifact_type=ArtifactType.PDF_REPORT).model_copy(
+        update={
+            "artifact_id": UUID("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"),
+            "media_type": "application/pdf",
+        }
+    )
+
+
+def _published_resources_with_report() -> tuple[PublishedResource, ...]:
+    report = _published_report()
+    return (
+        *_published_tile_resources(),
+        PublishedResource(
+            artifact_id=report.artifact_id,
+            download_path=(f"/api/v1/tasks/{TASK_ID}/artifacts/{report.artifact_id}/download"),
+        ),
+    )
+
+
+def test_publisher_result_requires_four_tiles_and_one_task_bound_pdf_report() -> None:
     result = PublisherPublishResult(
         task_id=TASK_ID,
         step_id="publish_results",
         attempt=1,
         correlation_id=CORRELATION_ID,
-        resources=_published_tile_resources(),
+        resources=_published_resources_with_report(),
+        report=_published_report(),
     )
 
-    assert result.report is None
-    assert {resource.tile_metadata.artifact_type for resource in result.resources} == set(
-        TileArtifactType
-    )
+    assert result.report.artifact_type is ArtifactType.PDF_REPORT
+    assert {
+        resource.tile_metadata.artifact_type
+        for resource in result.resources
+        if resource.tile_metadata is not None
+    } == set(TileArtifactType)
 
     with pytest.raises(ValidationError, match="four tile resources"):
         PublisherPublishResult(
@@ -703,7 +726,17 @@ def test_publisher_result_requires_four_tiles_but_allows_report_to_land_in_t13()
             step_id="publish_results",
             attempt=1,
             correlation_id=CORRELATION_ID,
-            resources=_published_tile_resources()[:-1],
+            resources=(*_published_tile_resources()[:-1], _published_resources_with_report()[-1]),
+            report=_published_report(),
+        )
+
+    with pytest.raises(ValidationError, match="Field required"):
+        PublisherPublishResult(
+            task_id=TASK_ID,
+            step_id="publish_results",
+            attempt=1,
+            correlation_id=CORRELATION_ID,
+            resources=_published_tile_resources(),
         )
 
 

@@ -309,7 +309,7 @@ class PublisherPublishResult(ContractModel):
     attempt: int = Field(ge=1)
     correlation_id: UUID
     resources: tuple[PublishedResource, ...]
-    report: ArtifactRef | None = None
+    report: ArtifactRef
 
     @model_validator(mode="after")
     def require_artifact_scope(self) -> Self:
@@ -335,11 +335,6 @@ class PublisherPublishResult(ContractModel):
         download_resources = tuple(
             resource for resource in self.resources if resource.download_path is not None
         )
-        if self.report is None:
-            if download_resources:
-                raise ValueError("publisher download resources require a report")
-            return self
-
         _require_artifact_scope(self.task_id, self.attempt, (self.report,))
         if (
             self.report.artifact_type is not ArtifactType.PDF_REPORT

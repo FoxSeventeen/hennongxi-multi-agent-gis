@@ -39,7 +39,7 @@ class PngResponse(Response):
 
 
 class ArtifactDownloadResponse(Response):
-    media_type = "application/octet-stream"
+    media_type = "application/pdf"
 
 
 def _not_implemented() -> NoReturn:
@@ -246,6 +246,8 @@ def create_contract_app() -> FastAPI:
     )
     def publish_results(
         command: Annotated[PublisherPublishCommand, Body()],
+        idempotency_key: Annotated[UUID, Header(alias="Idempotency-Key")],
+        correlation_id: Annotated[UUID, Header(alias="X-Correlation-ID")],
     ) -> PublisherPublishResult:
         _not_implemented()
 

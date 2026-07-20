@@ -307,6 +307,8 @@ def test_catalog_resolves_publish_command_only_when_receipts_match_exactly(tmp_p
 
     assert publication.attempt == 1
     assert publication.correlation_id == CORRELATION_ID
+    assert publication.analysis.statistics.valid_hectares == 6
+    assert publication.quality.metrics == command.quality
     assert tuple(tile.artifact.artifact_type for tile in publication.tiles) == tuple(
         ArtifactType(tile_type.value) for tile_type in TileArtifactType
     )

@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Protocol
+from uuid import UUID
 
 import rasterio  # type: ignore[import-untyped]
 from hennongxi_contracts import (
@@ -20,6 +21,8 @@ from rasterio.errors import RasterioError  # type: ignore[import-untyped]
 from rasterio.warp import transform_bounds  # type: ignore[import-untyped]
 
 from hennongxi_publisher_agent.catalog import ResolvedPublication
+from hennongxi_publisher_agent.report import ReportContent, ReportInputError, render_report
+from hennongxi_publisher_agent.report_artifacts import ReportArtifactStore
 from hennongxi_publisher_agent.tiles import style_for
 
 
@@ -45,15 +48,40 @@ class _SourceMetadata:
 class PublicationService:
     """Create deterministic public resources without exposing local storage locations."""
 
-    def __init__(self, catalog: PublicationCatalog, manifest_path: Path) -> None:
+    def __init__(
+        self,
+        catalog: PublicationCatalog,
+        manifest_path: Path,
+        report_store: ReportArtifactStore,
+    ) -> None:
         self._catalog = catalog
         self._manifest_path = manifest_path
+        self._report_store = report_store
 
-    def publish(self, command: PublisherPublishCommand) -> PublisherPublishResult:
+    def publish(
+        self,
+        command: PublisherPublishCommand,
+        idempotency_key: UUID,
+    ) -> PublisherPublishResult:
         publication = self._catalog.resolve_publication(command)
         if (
             publication.attempt != command.attempt
             or publication.correlation_id != command.correlation_id
+            or publication.analysis.task_id != command.task_id
+            or publication.analysis.attempt != command.attempt
+            or publication.analysis.correlation_id != command.correlation_id
+            or publication.quality.task_id != command.task_id
+            or publication.quality.attempt != command.attempt
+            or publication.quality.correlation_id != command.correlation_id
+            or publication.quality.metrics != command.quality
+            or {
+                artifact.artifact_type: artifact
+                for artifact in (
+                    *publication.analysis.artifacts,
+                    publication.quality.artifact,
+                )
+            }
+            != {artifact.artifact_type: artifact for artifact in command.artifacts}
         ):
             raise PublicationArtifactError("publication scope does not match the command")
         source_metadata = _load_source_metadata(self._manifest_path)
@@ -90,12 +118,50 @@ class PublicationService:
                     ),
                 )
             )
+
+        try:
+            report_created_at = datetime.now(UTC)
+            report_outcome = self._report_store.publish(
+                task_id=command.task_id,
+                attempt=command.attempt,
+                idempotency_key=idempotency_key,
+                created_at=report_created_at,
+                payload=render_report(
+                    ReportContent(
+                        task_id=command.task_id,
+                        attempt=command.attempt,
+                        correlation_id=command.correlation_id,
+                        created_at=report_created_at,
+                        before_date=source_metadata.before_date,
+                        after_date=source_metadata.after_date,
+                        attribution=source_metadata.attribution,
+                        statistics=publication.analysis.statistics,
+                        quality=publication.quality.metrics,
+                        artifacts=(
+                            *publication.analysis.artifacts,
+                            publication.quality.artifact,
+                        ),
+                    )
+                ),
+            )
+        except ReportInputError as error:
+            raise PublicationArtifactError("publication report inputs are incomplete") from error
+        resources.append(
+            PublishedResource(
+                artifact_id=report_outcome.artifact.artifact_id,
+                download_path=(
+                    f"/api/v1/tasks/{command.task_id}/artifacts/"
+                    f"{report_outcome.artifact.artifact_id}/download"
+                ),
+            )
+        )
         return PublisherPublishResult(
             task_id=command.task_id,
             step_id=command.step_id,
             attempt=command.attempt,
             correlation_id=command.correlation_id,
             resources=tuple(resources),
+            report=report_outcome.artifact,
         )
 
 

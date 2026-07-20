@@ -82,6 +82,17 @@ def test_tile_route_documents_png_success_and_json_failures() -> None:
         assert set(responses[status_code]["content"]) == {"application/json"}
 
 
+def test_report_download_documents_pdf_success_and_json_failures() -> None:
+    document = load_checked_in_openapi()
+    responses = document["paths"]["/api/v1/tasks/{task_id}/artifacts/{artifact_id}/download"][
+        "get"
+    ]["responses"]
+
+    assert set(responses["200"]["content"]) == {"application/pdf"}
+    for status_code in ("404", "409", "422"):
+        assert set(responses[status_code]["content"]) == {"application/json"}
+
+
 def test_analysis_route_requires_idempotency_header_and_returns_timing() -> None:
     document = load_checked_in_openapi()
     operation = document["paths"]["/internal/v1/analysis/run"]["post"]
@@ -136,7 +147,13 @@ def test_publisher_resources_expose_complete_tile_visualization_metadata() -> No
     assert {"value", "label", "color"} <= set(legend["required"])
 
     publish_result = schemas["PublisherPublishResult"]
-    assert "resources" in publish_result["required"]
-    assert "report" not in publish_result["required"]
+    assert {"resources", "report"} <= set(publish_result["required"])
     publish_operation = document["paths"]["/internal/v1/publisher/publish"]["post"]
     assert {"409", "422", "500", "503"} <= set(publish_operation["responses"])
+    headers = {
+        parameter["name"]: parameter
+        for parameter in publish_operation["parameters"]
+        if parameter["in"] == "header"
+    }
+    assert set(headers) == {"Idempotency-Key", "X-Correlation-ID"}
+    assert all(header["required"] is True for header in headers.values())
