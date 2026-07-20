@@ -75,13 +75,14 @@ def test_analysis_route_requires_idempotency_header_and_returns_timing() -> None
     document = load_checked_in_openapi()
     operation = document["paths"]["/internal/v1/analysis/run"]["post"]
 
-    header = next(
-        parameter
+    headers = {
+        parameter["name"]: parameter
         for parameter in operation["parameters"]
-        if parameter["name"] == "Idempotency-Key"
-    )
-    assert header["in"] == "header"
-    assert header["required"] is True
+        if parameter["in"] == "header"
+    }
+    assert set(headers) == {"Idempotency-Key", "X-Correlation-ID"}
+    assert all(header["required"] is True for header in headers.values())
 
     result_schema = document["components"]["schemas"]["AnalysisRunResult"]
     assert "elapsed_ms" in result_schema["required"]
+    assert "500" in operation["responses"]

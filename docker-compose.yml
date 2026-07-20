@@ -147,6 +147,7 @@ services:
     environment:
       <<: *common-agent-environment
       HEALTHCHECK_URL: http://127.0.0.1:8002/internal/v1/health
+      DATA_MANIFEST_PATH: ${DATA_MANIFEST_PATH:-/app/data/manifest.json}
       DATA_CACHE_DIR: ${DATA_CACHE_DIR:-/data/cache}
       ARTIFACT_ROOT: ${ARTIFACT_ROOT:-/data/outputs}
     networks:

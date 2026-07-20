@@ -202,11 +202,12 @@ def create_contract_app() -> FastAPI:
         operation_id="runAnalysis",
         tags=["Internal Agent"],
         response_model=AnalysisRunResult,
-        responses=_errors(409, 422, 503),
+        responses=_errors(409, 422, 500, 503),
     )
     def run_analysis(
         command: Annotated[AnalysisRunCommand, Body()],
         idempotency_key: Annotated[UUID, Header(alias="Idempotency-Key")],
+        correlation_id: Annotated[UUID, Header(alias="X-Correlation-ID")],
     ) -> AnalysisRunResult:
         _not_implemented()
 
