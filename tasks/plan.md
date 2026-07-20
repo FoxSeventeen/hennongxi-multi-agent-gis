@@ -323,26 +323,26 @@ The critical path is contracts → persistence/events → raster chain → orche
 
 **Acceptance criteria:**
 
-- [ ] Tests prove NDVI/difference values, nodata and zero-denominator masking, complete-watershed clipping, and grid mismatch rejection.
-- [ ] Change classes and area totals are deterministic and agree with pixel area within a documented tolerance.
-- [ ] Outputs retain expected CRS/transform/bounds/nodata and contain no random or precomputed analysis values.
+- [x] Tests prove NDVI/difference values, nodata and zero-denominator masking, complete-watershed clipping, and grid mismatch rejection.
+- [x] Change classes and area totals are deterministic and agree with pixel area within a documented tolerance.
+- [x] Outputs retain expected CRS/transform/bounds/nodata and contain no random or precomputed analysis values.
 
 **Verification:**
 
-- [ ] `pytest services/analysis_agent/tests/unit -q --cov=services.analysis_agent --cov-branch`
-- [ ] Critical pure raster logic reaches at least 90% branch coverage.
+- [x] `docker compose run --rm analysis-agent pytest services/analysis_agent/tests/unit -q --cov=hennongxi_analysis_agent --cov-branch --cov-fail-under=90`
+- [x] Critical pure raster logic reaches at least 90% branch coverage.
 
 **Dependencies:** T01, T02; T05 supplies the later real-data check but unit fixtures are generated at test time.
 
-**Files likely touched:** `services/analysis_agent/app/ndvi.py`, `services/analysis_agent/app/raster_io.py`, `services/analysis_agent/tests/unit/`.
+**Files touched:** `services/analysis_agent/src/hennongxi_analysis_agent/`, `services/analysis_agent/tests/unit/`, Analysis Agent dependency metadata, and runtime documentation.
 
 **Estimated scope:** M.
 
 #### Checkpoint C: Trusted inputs and math
 
-- [ ] T07-T09 tests pass, including cache loss and raster edge cases.
-- [ ] A real cached data preflight succeeds, and one small fixture produces inspectable georeferenced outputs.
-- [ ] No HTTP payload or LLM field can select an arbitrary filesystem path.
+- [x] T07-T09 tests pass, including cache loss and raster edge cases.
+- [x] A real cached data preflight succeeds, and one small fixture produces inspectable georeferenced outputs.
+- [x] No HTTP payload or LLM field can select an arbitrary filesystem path.
 
 ### Phase 4: Computed products, quality, and publishing
 

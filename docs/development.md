@@ -139,3 +139,22 @@ docker compose run --rm master-agent \
 ```
 
 第二条命令从 Master 容器通过 `http://data-agent:8001` 调用内部端点，同时验证真实缓存的 2024-08-12 日期、关联 ID、响应契约和路径注入拒绝。Data Agent 没有宿主端口，跨 Agent 调用不得改成进程内导入。
+
+## Analysis Agent 确定性栅格核心
+
+T09 只提供 Analysis Agent 内部的栅格 I/O 与纯计算函数，不新增 HTTP 路由，也不写入成果卷。裁剪函数接收已经打开的栅格和带明确 CRS 的完整流域几何；几何先转换到栅格 CRS，再由 Rasterio 掩膜和裁剪。输出对象保留 CRS、transform、shape、派生 bounds 与有限 nodata。红光、近红外、前后时相只要 CRS、transform 或 shape 任一不同就立即拒绝，不允许仅凭数组维度相同推定空间对齐。
+
+NDVI 固定使用浮点公式 `(NIR - Red) / (NIR + Red)`；来源掩膜、非有限值和零分母像元全部标为无效。变化值固定为 `after - before`。变化分级采用项目策略阈值 `±0.10`：`<= -0.10` 为下降（`-1`），`>= 0.10` 为上升（`1`），中间为稳定（`0`），无效类别值为 `-128`。阈值保存在分类结果中，面积统计只能沿用该值，不能单独传入另一个阈值造成标注不一致。
+
+面积统计只接受投影 CRS。单像元面积按完整仿射矩阵行列式 `abs(a*e - b*d)` 计算，再根据 CRS 线性单位系数换算为平方米；有效面积必须等于下降、稳定、上升三类面积之和。生成式微型栅格测试对面积使用 `1e-9` 平方米的绝对容差，测试数据在运行时创建，不签入随机值或预制 NDVI 成果。
+
+验证命令如下：
+
+```bash
+docker compose run --rm analysis-agent \
+  pytest services/analysis_agent/tests/unit -q \
+  --cov=hennongxi_analysis_agent \
+  --cov-branch --cov-report=term-missing --cov-fail-under=90
+```
+
+该命令覆盖 NDVI 数值、掩膜传播、零分母、网格错配、跨 CRS 完整流域裁剪、地理参考保持、分级边界、旋转/错切像元面积和地理 CRS 拒绝。T10 才负责受约束 HTTP 命令、任务级原子 GeoTIFF/JSON 写入与成果校验。

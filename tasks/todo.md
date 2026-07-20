@@ -71,16 +71,16 @@ Source of truth: `docs/spec.md` at `92e50a6`. Detailed rationale, file scope, an
   - [x] Resolve allow-listed logical data IDs and return normalized checksum-bearing metadata.
   - [x] Reject missing/corrupt/mismatched/under-covering inputs with structured errors.
   - [x] Pass network contract tests proving no in-process Agent call/path injection.
-- [ ] **T09 Implement deterministic NDVI/change core** (depends: T01-T02)
-  - [ ] Prove NDVI, difference, masks, clipping, alignment, classes, and projected areas.
-  - [ ] Preserve CRS/transform/bounds/nodata and reject grid mismatches.
-  - [ ] Reach at least 90% branch coverage for critical pure raster logic.
+- [x] **T09 Implement deterministic NDVI/change core** (depends: T01-T02)
+  - [x] Prove NDVI, difference, masks, clipping, alignment, classes, and projected areas.
+  - [x] Preserve CRS/transform/bounds/nodata and reject grid mismatches.
+  - [x] Reach at least 90% branch coverage for critical pure raster logic.
 
 ### Checkpoint C
 
-- [ ] T07-T09 pass, including cache-loss and raster edge cases.
-- [ ] Real cached data preflight and generated fixture inspection succeed.
-- [ ] Arbitrary filesystem paths cannot enter through HTTP or LLM plans.
+- [x] T07-T09 pass, including cache-loss and raster edge cases.
+- [x] Real cached data preflight and generated fixture inspection succeed.
+- [x] Arbitrary filesystem paths cannot enter through HTTP or LLM plans.
 
 ## Day 4 — Analysis, quality, and tiles
 
