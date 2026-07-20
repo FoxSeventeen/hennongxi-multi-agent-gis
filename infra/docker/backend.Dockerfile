@@ -27,7 +27,7 @@ RUN apt-get update \
 
 RUN groupadd --gid 10001 app \
     && useradd --uid 10001 --gid app --no-create-home --shell /usr/sbin/nologin app \
-    && mkdir -p /app /data/cache /data/outputs \
+    && mkdir -p /app /data/cache /data/outputs /data/quality-reports \
     && chown -R app:app /app /data
 
 WORKDIR /app

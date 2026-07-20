@@ -368,26 +368,28 @@ The critical path is contracts → persistence/events → raster chain → orche
 
 **规模：** M。
 
-#### Task 11: Deliver independent Quality Agent evaluation
+#### 任务 11：交付独立 Quality Agent 评估与原子报告
 
-**Description:** Implement coverage, valid-pixel ratio, output completeness, and elapsed-time evaluation as an independent network service. Produce component values, thresholds, pass/warn/fail conclusion, and evidence rather than a single opaque score.
+**说明：** Quality Agent 通过私网 HTTP 接口独立重开 Analysis 的固定成果，核对成果引用、SHA-256、空间网格、像元值域和统计一致性，并计算流域覆盖率、有效像元率、输出完整性及 Analysis 耗时。评估结果包含明确阈值、中文证据与 PASS/FAIL 结论，并原子发布到独立质量报告卷。
 
-**Acceptance criteria:**
+**验收标准：**
 
-- [ ] All four required metrics are computed from input/output metadata and raster inspection, with explicit units and thresholds.
-- [ ] Missing/corrupt artifacts and insufficient coverage cannot receive a passing conclusion.
-- [ ] Boundary tests cover threshold edges and a network contract test validates the response schema.
+- [x] 四项指标均来自受控元数据或独立栅格检查；覆盖率取四个栅格覆盖率最小值，有效像元率取四个栅格有效率最小值，完整性要求固定的 5/5 成果，耗时使用非负毫秒整数。
+- [x] 任一成果缺失、校验和不符、媒体类型错误、损坏、网格或值域非法、统计不一致、覆盖率或有效像元率不足，都不能得到 PASS。
+- [x] 阈值边界、已知好坏夹具、结构化错误、幂等复用、报告篡改和 Data→Analysis→Quality 私网响应契约均有测试覆盖。
 
-**Verification:**
+**验证：**
 
-- [ ] `docker compose run --rm quality-agent pytest services/quality_agent/tests -q`
-- [ ] Known good/bad fixture evaluations match expected conclusions.
+- [x] `docker compose run --rm quality-agent pytest services/quality_agent/tests -q`
+- [x] 修正后真实 Sentinel-2 数据的私网链路结论为 PASS：流域覆盖率 `1.0000`、有效像元率约 `0.9312`、输出完整性 `5/5`。
+- [x] 重复幂等键返回经重新校验的同一结果；质量报告的字节数与 SHA-256 和响应元数据一致。
+- [x] 最终后端全量测试为 `168 passed, 3 skipped`；Ruff、格式、Mypy、OpenAPI、Compose 配置和 `uv sync --frozen` 镜像构建全部通过。
 
-**Dependencies:** T02, T04, T10.
+**依赖：** T02、T04、T10。
 
-**Files likely touched:** `services/quality_agent/app/`, `services/quality_agent/tests/`.
+**实际修改文件：** `services/quality_agent/src/hennongxi_quality_agent/`、`services/quality_agent/tests/`、共享契约/OpenAPI、Compose 卷和环境、后端测试镜像及运行文档。
 
-**Estimated scope:** M.
+**规模：** M。
 
 #### Task 12: Publish safe raster tiles and artifact metadata
 

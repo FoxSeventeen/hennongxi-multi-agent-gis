@@ -216,7 +216,7 @@ def create_contract_app() -> FastAPI:
         operation_id="evaluateQuality",
         tags=["Internal Agent"],
         response_model=QualityEvaluateResult,
-        responses=_errors(409, 422, 503),
+        responses=_errors(409, 422, 500, 503),
     )
     def evaluate_quality(
         command: Annotated[QualityEvaluateCommand, Body()],

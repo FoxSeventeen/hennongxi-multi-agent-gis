@@ -174,7 +174,9 @@ services:
     environment:
       <<: *common-agent-environment
       HEALTHCHECK_URL: http://127.0.0.1:8003/internal/v1/health
+      DATA_MANIFEST_PATH: ${DATA_MANIFEST_PATH:-/app/data/manifest.json}
       ARTIFACT_ROOT: ${ARTIFACT_ROOT:-/data/outputs}
+      QUALITY_REPORT_ROOT: ${QUALITY_REPORT_ROOT:-/data/quality-reports}
     networks:
       - private
     volumes:
@@ -182,6 +184,9 @@ services:
         source: artifacts
         target: /data/outputs
         read_only: true
+      - type: volume
+        source: quality-reports
+        target: /data/quality-reports
 
   publisher-agent:
     <<: *agent-base
@@ -268,3 +273,4 @@ volumes:
   redis-data:
   data-cache:
   artifacts:
+  quality-reports:

@@ -181,3 +181,34 @@ docker compose run --rm --no-deps \
 ```
 
 第二条命令先通过 Data Agent 私网接口取得真实 2019-08-19/2024-08-12 资产元数据，再调用 Analysis Agent 两次。测试会验证首次生成与第二次幂等复用，并从成果卷重新打开四个 GeoTIFF 和面积统计 JSON，核对 CRS、bounds、nodata、尺寸、阈值、有效像元和 SHA-256。Analysis Agent 没有宿主端口；Master 后续只能通过 Compose 私网调用该接口。
+
+## Quality Agent 独立验收与原子报告
+
+Quality Agent 的私网端点为 `POST /internal/v1/quality/evaluate`。请求必须符合共享 `QualityEvaluateCommand`，同时携带 UUID 格式的 `Idempotency-Key` 与 `X-Correlation-ID`；关联头必须和请求体一致。命令只接受 Analysis 返回的四个栅格成果和一个面积统计成果引用，不接受任何路径字段。Quality Agent 没有宿主端口，也不导入 Data 或 Analysis Agent 的应用代码。
+
+服务仅以只读方式挂载 Analysis 成果卷，并使用独立可写的 `quality-reports` 命名卷。它根据固定的 task/attempt 目录和固定文件名重新定位成果，拒绝符号链接，然后核对状态、媒体类型、字节数与 SHA-256。四个 GeoTIFF 会被独立重开并检查单波段、CRS、分辨率、像元对齐、nodata、有限值和值域；面积统计 JSON 必须具有精确字段集，像元计数、分类有效像元数和面积乘积必须互相一致。
+
+质量指标的定义如下：
+
+- 流域覆盖率为四个栅格各自覆盖率的最小值，清单批准阈值为 `>= 0.95`。
+- 有效像元率为四个栅格在流域覆盖部分有效率的最小值，清单批准阈值为 `>= 0.90`。
+- 输出完整性要求四个栅格和面积统计全部通过检查，即 `5/5`。
+- Analysis 耗时直接记录为非负整数毫秒；当前规格没有批准最大耗时门限，因此不另行虚构阈值。
+
+只有前三项门禁全部满足时结论才是 `PASS`，否则是 `FAIL`。响应同时给出四条中文证据，避免用单一不透明分数掩盖失败原因。质量报告先写入隐藏 staging 目录并刷新到磁盘，再以同文件系统目录替换原子发布；收据记录幂等键和结果。相同 task/attempt 与幂等键只有在报告重新校验成功后才复用，不同幂等键返回 409，已发布报告损坏也返回结构化 409。成果缺失、损坏或不符合质量约束会形成诚实的 `FAIL` 报告；批准的质量配置或报告存储不可用时返回经脱敏的 503，意外错误返回经脱敏的 500。
+
+服务测试和真实三 Agent 私网链路分别执行：
+
+```bash
+docker compose run --rm quality-agent \
+  pytest services/quality_agent/tests -q
+
+docker compose run --rm --no-deps \
+  --env DATA_AGENT_BASE_URL=http://data-agent:8001 \
+  --env ANALYSIS_AGENT_BASE_URL=http://analysis-agent:8002 \
+  --env QUALITY_AGENT_BASE_URL=http://quality-agent:8003 \
+  quality-agent \
+  pytest services/quality_agent/tests/integration/test_quality_network.py -q
+```
+
+第二条命令通过真实私网依次调用 Data、Analysis 和 Quality，并重复 Quality 请求验证幂等复用；随后从独立报告卷读取 JSON，核对 task 作用域、指标内容、字节数和 SHA-256。使用修正后的 2019-08-19/2024-08-12 Sentinel-2 缓存时，验收结果为覆盖率 `1.0000`、有效像元率约 `0.9312`、输出完整性 `5/5`、结论 `PASS`。

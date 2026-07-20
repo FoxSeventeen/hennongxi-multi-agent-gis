@@ -102,3 +102,4 @@ def test_quality_route_requires_idempotency_and_correlation_headers() -> None:
 
     metrics_schema = document["components"]["schemas"]["QualityMetrics"]
     assert {"thresholds", "conclusion", "evidence"} <= set(metrics_schema["required"])
+    assert "500" in operation["responses"]

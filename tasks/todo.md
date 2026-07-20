@@ -90,10 +90,10 @@ Source of truth: `docs/spec.md` at `92e50a6`. Detailed rationale, file scope, an
   - [x] 通过 HTTP 生成两期 NDVI、差值、变化分级和面积统计。
   - [x] 强制任务级原子写入、校验和、幂等复用，并禁止发布部分成果。
   - [x] 通过服务测试、真实私网测试和 GDAL/Rasterio 成果检查。
-- [ ] **T11 Deliver independent Quality Agent** (depends: T02, T04, T10)
-  - [ ] Compute coverage, valid pixels, completeness, and elapsed time with thresholds/evidence.
-  - [ ] Fail missing/corrupt/insufficient outputs and cover threshold edges.
-  - [ ] Pass unit and network schema tests for known good/bad fixtures.
+- [x] **T11 交付独立 Quality Agent 评估与原子报告**（依赖：T02、T04、T10）
+  - [x] 独立检查覆盖率、有效像元率、5/5 输出完整性和 Analysis 耗时，并返回阈值与中文证据。
+  - [x] 缺失、损坏、篡改、网格或值域非法、统计不一致及阈值不足的成果均不能通过。
+  - [x] 通过边界、好坏夹具、幂等、原子报告、HTTP 契约和真实 Data→Analysis→Quality 私网测试。
 - [ ] **T12 Publish safe raster tiles** (depends: T02, T04, T10; gate: G1)
   - [ ] Render NDVI/difference tiles with stable colors, nodata transparency, bounds, and legends.
   - [ ] Reject traversal, invalid coordinate/type, and cross-task artifact access.

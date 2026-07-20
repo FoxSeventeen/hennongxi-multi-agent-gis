@@ -42,6 +42,7 @@ def test_compose_declares_the_complete_runtime_topology() -> None:
         "redis-data",
         "data-cache",
         "artifacts",
+        "quality-reports",
     }
     assert compose["networks"]["private"]["internal"] is True
 
@@ -80,6 +81,10 @@ def test_shared_storage_has_least_privilege_access_modes() -> None:
     assert analysis_mounts[("data-cache", "/data/cache")]["read_only"] is True
     assert analysis_mounts[("artifacts", "/data/outputs")].get("read_only", False) is False
     assert quality_mounts[("artifacts", "/data/outputs")]["read_only"] is True
+    assert (
+        quality_mounts[("quality-reports", "/data/quality-reports")].get("read_only", False)
+        is False
+    )
     assert publisher_mounts[("artifacts", "/data/outputs")].get("read_only", False) is False
 
     assert (
