@@ -20,7 +20,11 @@ from hennongxi_contracts import (
     PlanSource,
     PlanStep,
     PlanStepKind,
+    QualityConclusion,
     QualityEvaluateCommand,
+    QualityEvaluateResult,
+    QualityMetrics,
+    QualityThresholds,
     RasterGrid,
     StructuredError,
     TaskEvent,
@@ -409,6 +413,119 @@ def test_quality_command_rejects_an_artifact_from_another_task() -> None:
             correlation_id=CORRELATION_ID,
             artifacts=(valid_artifact(task_id=UUID("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee")),),
             analysis_elapsed_ms=100,
+        )
+
+
+def test_quality_command_allows_missing_outputs_but_rejects_duplicate_types() -> None:
+    artifact = valid_artifact(artifact_type=ArtifactType.NDVI_BEFORE)
+
+    command = QualityEvaluateCommand(
+        task_id=TASK_ID,
+        step_id="evaluate_quality",
+        attempt=1,
+        correlation_id=CORRELATION_ID,
+        artifacts=(artifact,),
+        analysis_elapsed_ms=100,
+    )
+    assert command.artifacts == (artifact,)
+
+    with pytest.raises(ValidationError, match="unique supported analysis artifact types"):
+        QualityEvaluateCommand(
+            task_id=TASK_ID,
+            step_id="evaluate_quality",
+            attempt=1,
+            correlation_id=CORRELATION_ID,
+            artifacts=(artifact, artifact),
+            analysis_elapsed_ms=100,
+        )
+
+
+def test_quality_command_rejects_non_analysis_artifacts_and_wrong_step() -> None:
+    with pytest.raises(ValidationError, match="supported analysis artifact types"):
+        QualityEvaluateCommand(
+            task_id=TASK_ID,
+            step_id="evaluate_quality",
+            attempt=1,
+            correlation_id=CORRELATION_ID,
+            artifacts=(valid_artifact(artifact_type=ArtifactType.PDF_REPORT),),
+            analysis_elapsed_ms=100,
+        )
+
+    with pytest.raises(ValidationError, match="evaluate_quality"):
+        QualityEvaluateCommand(
+            task_id=TASK_ID,
+            step_id="analyze_ndvi_change",
+            attempt=1,
+            correlation_id=CORRELATION_ID,
+            artifacts=(),
+            analysis_elapsed_ms=100,
+        )
+
+
+def test_quality_metrics_expose_thresholds_units_and_boundary_pass() -> None:
+    metrics = QualityMetrics(
+        coverage_ratio=0.95,
+        valid_pixel_ratio=0.90,
+        output_complete=True,
+        elapsed_ms=0,
+        thresholds=QualityThresholds(
+            minimum_watershed_coverage_ratio=0.95,
+            minimum_valid_pixel_ratio=0.90,
+        ),
+        conclusion=QualityConclusion.PASS,
+        passed=True,
+        evidence=(
+            "流域覆盖率 0.9500，阈值 >= 0.9500",
+            "有效像元率 0.9000，阈值 >= 0.9000",
+            "输出完整性 5/5，要求 5/5",
+            "Analysis 耗时 0 ms，要求为非负整数",
+        ),
+    )
+
+    assert metrics.conclusion is QualityConclusion.PASS
+    assert metrics.thresholds.elapsed_minimum_ms == 0
+
+
+def test_quality_metrics_reject_an_inconsistent_passing_conclusion() -> None:
+    with pytest.raises(ValidationError, match="passing conclusion requires every quality gate"):
+        QualityMetrics(
+            coverage_ratio=0.9499,
+            valid_pixel_ratio=0.90,
+            output_complete=True,
+            elapsed_ms=1,
+            thresholds=QualityThresholds(
+                minimum_watershed_coverage_ratio=0.95,
+                minimum_valid_pixel_ratio=0.90,
+            ),
+            conclusion=QualityConclusion.PASS,
+            passed=True,
+            evidence=("覆盖不足", "有效像元达标", "输出完整", "耗时已记录"),
+        )
+
+
+def test_quality_result_requires_a_complete_quality_report() -> None:
+    metrics = QualityMetrics(
+        coverage_ratio=0.95,
+        valid_pixel_ratio=0.90,
+        output_complete=True,
+        elapsed_ms=10,
+        thresholds=QualityThresholds(
+            minimum_watershed_coverage_ratio=0.95,
+            minimum_valid_pixel_ratio=0.90,
+        ),
+        conclusion=QualityConclusion.PASS,
+        passed=True,
+        evidence=("覆盖达标", "有效像元达标", "输出完整", "耗时已记录"),
+    )
+
+    with pytest.raises(ValidationError, match="complete quality report"):
+        QualityEvaluateResult(
+            task_id=TASK_ID,
+            step_id="evaluate_quality",
+            attempt=1,
+            correlation_id=CORRELATION_ID,
+            metrics=metrics,
+            artifact=valid_artifact(artifact_type=ArtifactType.NDVI_BEFORE),
         )
 
 

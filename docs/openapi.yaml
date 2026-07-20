@@ -401,12 +401,27 @@ paths:
       - Internal Agent
       summary: Evaluate Quality
       operationId: evaluateQuality
+      parameters:
+      - name: Idempotency-Key
+        in: header
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Idempotency-Key
+      - name: X-Correlation-ID
+        in: header
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: X-Correlation-Id
       requestBody:
+        required: true
         content:
           application/json:
             schema:
               $ref: '#/components/schemas/QualityEvaluateCommand'
-        required: true
       responses:
         '200':
           description: Successful Response
@@ -1152,6 +1167,13 @@ components:
       - resources
       - report
       title: PublisherPublishResult
+    QualityConclusion:
+      type: string
+      enum:
+      - PASS
+      - WARN
+      - FAIL
+      title: QualityConclusion
     QualityEvaluateCommand:
       properties:
         schema_version:
@@ -1255,6 +1277,10 @@ components:
           type: integer
           minimum: 0.0
           title: Elapsed Ms
+        thresholds:
+          $ref: '#/components/schemas/QualityThresholds'
+        conclusion:
+          $ref: '#/components/schemas/QualityConclusion'
         passed:
           type: boolean
           title: Passed
@@ -1264,8 +1290,8 @@ components:
             maxLength: 200
             minLength: 1
           type: array
+          minItems: 4
           title: Evidence
-          default: []
       additionalProperties: false
       type: object
       required:
@@ -1273,8 +1299,44 @@ components:
       - valid_pixel_ratio
       - output_complete
       - elapsed_ms
+      - thresholds
+      - conclusion
       - passed
+      - evidence
       title: QualityMetrics
+    QualityThresholds:
+      properties:
+        schema_version:
+          type: string
+          const: '1.0'
+          title: Schema Version
+          default: '1.0'
+        minimum_watershed_coverage_ratio:
+          type: number
+          maximum: 1.0
+          minimum: 0.0
+          title: Minimum Watershed Coverage Ratio
+        minimum_valid_pixel_ratio:
+          type: number
+          maximum: 1.0
+          minimum: 0.0
+          title: Minimum Valid Pixel Ratio
+        output_complete_required:
+          type: boolean
+          const: true
+          title: Output Complete Required
+          default: true
+        elapsed_minimum_ms:
+          type: integer
+          const: 0
+          title: Elapsed Minimum Ms
+          default: 0
+      additionalProperties: false
+      type: object
+      required:
+      - minimum_watershed_coverage_ratio
+      - minimum_valid_pixel_ratio
+      title: QualityThresholds
     RasterGrid:
       properties:
         schema_version:

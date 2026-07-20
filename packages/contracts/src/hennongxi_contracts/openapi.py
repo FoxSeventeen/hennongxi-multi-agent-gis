@@ -220,6 +220,8 @@ def create_contract_app() -> FastAPI:
     )
     def evaluate_quality(
         command: Annotated[QualityEvaluateCommand, Body()],
+        idempotency_key: Annotated[UUID, Header(alias="Idempotency-Key")],
+        correlation_id: Annotated[UUID, Header(alias="X-Correlation-ID")],
     ) -> QualityEvaluateResult:
         _not_implemented()
 

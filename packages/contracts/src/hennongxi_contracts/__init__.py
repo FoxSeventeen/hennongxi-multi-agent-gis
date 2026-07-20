@@ -17,9 +17,11 @@ from hennongxi_contracts.commands import (
     PublishedResource,
     PublisherPublishCommand,
     PublisherPublishResult,
+    QualityConclusion,
     QualityEvaluateCommand,
     QualityEvaluateResult,
     QualityMetrics,
+    QualityThresholds,
     RasterGrid,
 )
 from hennongxi_contracts.common import CONTRACT_VERSION, AgentName, ContractModel
@@ -89,9 +91,11 @@ __all__ = [
     "PublishedResource",
     "PublisherPublishCommand",
     "PublisherPublishResult",
+    "QualityConclusion",
     "QualityEvaluateCommand",
     "QualityEvaluateResult",
     "QualityMetrics",
+    "QualityThresholds",
     "RasterGrid",
     "ReadinessBlocker",
     "ReadinessResponse",

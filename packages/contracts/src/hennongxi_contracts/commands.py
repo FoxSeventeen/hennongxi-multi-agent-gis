@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 from enum import StrEnum
-from typing import Self
+from typing import Literal, Self
 from uuid import UUID
 
 from pydantic import Field, FiniteFloat, model_validator
@@ -149,13 +149,53 @@ class AnalysisRunResult(ContractModel):
         return self
 
 
+QUALITY_INPUT_ARTIFACT_TYPES = frozenset(
+    {
+        ArtifactType.NDVI_BEFORE,
+        ArtifactType.NDVI_AFTER,
+        ArtifactType.NDVI_DIFFERENCE,
+        ArtifactType.CHANGE_CLASSIFICATION,
+        ArtifactType.AREA_STATISTICS,
+    }
+)
+
+
+class QualityConclusion(StrEnum):
+    PASS = "PASS"
+    WARN = "WARN"
+    FAIL = "FAIL"
+
+
+class QualityThresholds(ContractModel):
+    minimum_watershed_coverage_ratio: float = Field(ge=0, le=1)
+    minimum_valid_pixel_ratio: float = Field(ge=0, le=1)
+    output_complete_required: Literal[True] = True
+    elapsed_minimum_ms: Literal[0] = 0
+
+
 class QualityMetrics(ContractModel):
     coverage_ratio: float = Field(ge=0, le=1)
     valid_pixel_ratio: float = Field(ge=0, le=1)
     output_complete: bool
     elapsed_ms: int = Field(ge=0)
+    thresholds: QualityThresholds
+    conclusion: QualityConclusion
     passed: bool
-    evidence: tuple[ShortText, ...] = ()
+    evidence: tuple[ShortText, ...] = Field(min_length=4)
+
+    @model_validator(mode="after")
+    def require_consistent_conclusion(self) -> Self:
+        gates_pass = (
+            self.coverage_ratio >= self.thresholds.minimum_watershed_coverage_ratio
+            and self.valid_pixel_ratio >= self.thresholds.minimum_valid_pixel_ratio
+            and self.output_complete is self.thresholds.output_complete_required
+            and self.elapsed_ms >= self.thresholds.elapsed_minimum_ms
+        )
+        if self.conclusion is QualityConclusion.PASS and not gates_pass:
+            raise ValueError("passing conclusion requires every quality gate")
+        if self.passed != (self.conclusion is QualityConclusion.PASS):
+            raise ValueError("passed must match the quality conclusion")
+        return self
 
 
 class QualityEvaluateCommand(InternalCommand):
@@ -165,6 +205,15 @@ class QualityEvaluateCommand(InternalCommand):
     @model_validator(mode="after")
     def require_artifact_scope(self) -> Self:
         _require_artifact_scope(self.task_id, self.attempt, self.artifacts)
+        artifact_types = tuple(artifact.artifact_type for artifact in self.artifacts)
+        if self.step_id != "evaluate_quality":
+            raise ValueError("quality command requires the evaluate_quality step")
+        if any(
+            artifact_type not in QUALITY_INPUT_ARTIFACT_TYPES for artifact_type in artifact_types
+        ):
+            raise ValueError("quality command accepts only supported analysis artifact types")
+        if len(set(artifact_types)) != len(artifact_types):
+            raise ValueError("quality command requires unique supported analysis artifact types")
         return self
 
 
@@ -179,6 +228,15 @@ class QualityEvaluateResult(ContractModel):
     @model_validator(mode="after")
     def require_artifact_scope(self) -> Self:
         _require_artifact_scope(self.task_id, self.attempt, (self.artifact,))
+        if (
+            self.step_id != "evaluate_quality"
+            or self.artifact.artifact_type is not ArtifactType.QUALITY_REPORT
+            or self.artifact.status is not ArtifactStatus.COMPLETE
+            or self.artifact.media_type != "application/json"
+        ):
+            raise ValueError(
+                "quality result requires a complete quality report for the evaluate_quality step"
+            )
         return self
 
 
