@@ -103,7 +103,7 @@ def create_contract_app() -> FastAPI:
         operation_id="getTask",
         tags=["Master public"],
         response_model=TaskResponse,
-        responses=_errors(404, 422),
+        responses=_errors(404, 422, 503),
     )
     def get_task(task_id: Annotated[UUID, Path()]) -> TaskResponse:
         """Reconstruct durable task, plan, step, error, and artifact state."""

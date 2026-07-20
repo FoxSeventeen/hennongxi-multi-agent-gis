@@ -44,7 +44,12 @@ def test_each_agent_exposes_only_its_approved_health_routes(
 
     expected_paths = {"/internal/v1/health"}
     if service_name == "master":
-        expected_paths |= {"/api/v1/health", "/api/v1/config/readiness"}
+        expected_paths |= {
+            "/api/v1/health",
+            "/api/v1/config/readiness",
+            "/api/v1/tasks",
+            "/api/v1/tasks/{task_id}",
+        }
     if service_name == "data":
         expected_paths.add("/internal/v1/data/prepare")
     if service_name == "analysis":

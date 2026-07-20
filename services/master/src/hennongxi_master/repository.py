@@ -197,6 +197,35 @@ class TaskRepository:
                 },
             )
 
+    async def ensure_watershed(self, value: WatershedCreate) -> None:
+        async with self._sessions.begin() as session:
+            await session.execute(
+                text(
+                    "INSERT INTO watersheds "
+                    "(watershed_id, slug, name, source_metadata, created_at, geometry) "
+                    "VALUES (:watershed_id, :slug, :name, CAST(:source_metadata AS jsonb), "
+                    ":created_at, "
+                    "ST_Multi(ST_Force2D(ST_SetSRID(ST_GeomFromGeoJSON(:geometry), 4326)))) "
+                    "ON CONFLICT (watershed_id) DO NOTHING"
+                ),
+                {
+                    "watershed_id": value.watershed_id,
+                    "slug": value.slug,
+                    "name": value.name,
+                    "source_metadata": _json(value.source_metadata),
+                    "created_at": value.created_at,
+                    "geometry": _json(value.geometry),
+                },
+            )
+
+    async def get_watershed_id_by_slug(self, slug: str) -> UUID | None:
+        async with self._sessions() as session:
+            watershed_id = await session.scalar(
+                text("SELECT watershed_id FROM watersheds WHERE slug = :slug"),
+                {"slug": slug},
+            )
+        return UUID(str(watershed_id)) if watershed_id is not None else None
+
     async def create_task(
         self,
         *,

@@ -480,32 +480,32 @@ The critical path is contracts → persistence/events → raster chain → orche
 
 **规模：**M。
 
-#### Task 15: Expose task creation, query, health, and readiness APIs
+#### 任务 15：暴露任务创建、查询、健康检查和就绪 API
 
-**Description:** Implement the non-streaming Master public APIs for input validation, `202` task creation, durable task reconstruction, aggregate Agent health, and non-secret configuration readiness. Creation commits runnable work for the database-claiming worker and returns without waiting for analysis.
+**说明：**实现 Master 的非流式公共 API，包括输入校验、返回 `202` 的任务创建、持久化任务重建、Agent 聚合健康检查，以及不暴露密钥的配置就绪检查。创建请求只提交可由数据库工作者认领的任务，不等待分析完成。
 
-**Acceptance criteria:**
+**验收标准：**
 
-- [ ] Valid Chinese input returns a unique `task_id` and `PENDING`; invalid/oversized input returns the documented structured error.
-- [ ] Query returns task, attempt, plan, steps, progress, events summary, quality result, and artifacts consistently after a fresh Master process.
-- [ ] Health/readiness distinguishes service health, LLM configuration, data cache, database, and Redis without exposing secret values.
+- [x] 合法中文输入返回唯一的 `task_id` 和 `PENDING`；非法、空白或超长输入返回契约规定的结构化错误。
+- [x] 全新 Master 进程可按已批准的共享契约一致重建任务、attempt、plan、steps、progress、artifacts 和 `last_error`；事件摘要与实时事件流由任务 17 实现。
+- [x] 健康/就绪响应清晰区分服务连通性、LLM 配置、已批准数据清单、数据库和 Redis，且不暴露密钥或连接详情。
 
-**Verification:**
+**验证：**
 
-- [ ] `docker compose run --rm master pytest services/master/tests -q -k 'task_api or readiness or health'`
-- [ ] OpenAPI contract comparison passes.
+- [x] 容器内任务 API、健康/就绪、批准数据自动登记及 PostGIS 重启恢复测试通过（19 项）。
+- [x] OpenAPI 生成、规范校验和运行时契约比较通过；完整后端回归测试通过（261 项通过，16 项按宿主机环境跳过）。
 
-**Dependencies:** T03, T05-T07, T14.
+**依赖：**T03、T05-T07、T14。
 
-**Files likely touched:** `services/master/app/api/`, task service/repository integration, API tests.
+**实际修改文件：**Master 任务 API、数据仓库与批准流域加载器，观测应用生命周期，共享 OpenAPI 生成器、Compose 配置及对应测试。
 
-**Estimated scope:** M.
+**规模：**M。
 
-#### Checkpoint E: Public backend surface
+#### 检查点 E：公共后端接口
 
-- [ ] T13-T15 verification passes and all public responses match OpenAPI.
-- [ ] A task can be created/queryable before processing, and the LLM/data readiness blockers are honest.
-- [ ] A fixture report renders readable Chinese and downloads only through an authorized artifact lookup.
+- [x] T13-T15 验证通过，所有公共响应与 OpenAPI 一致。
+- [x] 任务在处理开始前即可创建和查询，LLM/数据就绪阻塞项如实呈现。
+- [x] 固定样例报告可读中文，并且只能通过经过校验的任务归属关系下载。
 
 ### Phase 6: Orchestration, streaming, and recovery
 

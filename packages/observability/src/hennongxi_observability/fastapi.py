@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator, Callable
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from datetime import UTC, datetime
 
 import structlog
@@ -13,8 +13,20 @@ from hennongxi_contracts import AgentName, HealthState, ServiceHealth, ServiceNa
 from hennongxi_observability.correlation import CorrelationIdMiddleware
 from hennongxi_observability.logging import configure_logging
 
+AppLifespan = Callable[[FastAPI], AbstractAsyncContextManager[None]]
 
-def create_observed_agent_app(service: AgentName, port: int) -> FastAPI:
+
+@asynccontextmanager
+async def _empty_lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    yield
+
+
+def create_observed_agent_app(
+    service: AgentName,
+    port: int,
+    *,
+    resource_lifespan: AppLifespan | None = None,
+) -> FastAPI:
     """Create an independently startable Agent app with only local health."""
 
     configure_logging()
@@ -22,13 +34,15 @@ def create_observed_agent_app(service: AgentName, port: int) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        app.state.started = True
-        logger.info("service_started", service=service.value, port=port)
-        try:
-            yield
-        finally:
-            app.state.started = False
-            logger.info("service_stopped", service=service.value, port=port)
+        context = resource_lifespan(app) if resource_lifespan is not None else _empty_lifespan(app)
+        async with context:
+            app.state.started = True
+            logger.info("service_started", service=service.value, port=port)
+            try:
+                yield
+            finally:
+                app.state.started = False
+                logger.info("service_stopped", service=service.value, port=port)
 
     app = FastAPI(
         title=f"Hennongxi {service.value.title()} Agent",

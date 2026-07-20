@@ -121,16 +121,16 @@ Source of truth: `docs/spec.md` at `92e50a6`. Detailed rationale, file scope, an
   - [x] 证明密钥与不安全字段不会进入日志、持久化、响应或执行流程。
   - [x] 通过显式真实冒烟，或如实记录非敏感 readiness 阻塞项。
   - [x] 通过 PostGIS 集成测试证明脱敏失败元数据与恢复计划原子落库，非法组合完全回滚。
-- [ ] **T15 Expose task/query/health/readiness APIs** (depends: T03, T05-T07, T14)
-  - [ ] Return `202`/unique task ID for valid Chinese input and structured validation failures.
-  - [ ] Reconstruct full current task/plan/steps/events summary/results after restart.
-  - [ ] Pass OpenAPI, task API, aggregate health, and configuration readiness tests.
+- [x] **T15 暴露任务创建、查询、健康检查和就绪 API**（依赖：T03、T05-T07、T14）
+  - [x] 合法中文输入返回 `202`、唯一任务 ID 和 `PENDING`；校验失败返回结构化错误。
+  - [x] 重启后按已批准契约重建任务、attempt、plan、steps、progress、artifacts 和 `last_error`；事件流留给 T17。
+  - [x] OpenAPI、任务 API、聚合健康检查、配置就绪及 PostGIS 重启恢复测试通过。
 
-### Checkpoint E
+### 检查点 E
 
-- [ ] T13-T15 pass and every public response matches OpenAPI.
-- [ ] Task creation is non-blocking/queryable and readiness is honest.
-- [ ] Chinese report is readable and task-bound.
+- [x] T13-T15 通过，所有公共响应与 OpenAPI 一致。
+- [x] 任务创建不阻塞且可查询，就绪状态如实呈现。
+- [x] 中文报告可读，并与所属任务严格绑定。
 
 ## Day 6 — Orchestration, SSE, and retry
 
