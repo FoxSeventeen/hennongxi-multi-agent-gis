@@ -96,6 +96,7 @@ Source of truth: `docs/spec.md` at `92e50a6`. Detailed rationale, file scope, an
   - [x] 通过边界、好坏夹具、幂等、原子报告、HTTP 契约和真实 Data→Analysis→Quality 私网测试。
 - [ ] **T12 Publish safe raster tiles** (depends: T02, T04, T10; gate: G1)
   - [x] 冻结 WGS84 边界、前后日期、单位、数据归属和有序颜色图例契约，并拒绝不完整或质量未通过的发布输入。
+  - [x] 实现与 HTTP 解耦的 Rio-Tiler 渲染核心，固定 NDVI/差值/分级色带、XYZ 边界与 256×256 PNG nodata 透明度。
   - [ ] Render NDVI/difference tiles with stable colors, nodata transparency, bounds, and legends.
   - [ ] Reject traversal, invalid coordinate/type, and cross-task artifact access.
   - [ ] Pass tile response and representative PNG visual-data assertions.

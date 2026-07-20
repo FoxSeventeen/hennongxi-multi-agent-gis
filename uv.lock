@@ -499,6 +499,8 @@ dependencies = [
     { name = "fastapi" },
     { name = "hennongxi-contracts" },
     { name = "hennongxi-observability" },
+    { name = "rasterio" },
+    { name = "rio-tiler" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -507,6 +509,8 @@ requires-dist = [
     { name = "fastapi", specifier = "==0.139.2" },
     { name = "hennongxi-contracts", editable = "packages/contracts" },
     { name = "hennongxi-observability", editable = "packages/observability" },
+    { name = "rasterio", specifier = "==1.5.0" },
+    { name = "rio-tiler", specifier = "==9.4.0" },
     { name = "uvicorn", extras = ["standard"], specifier = "==0.51.0" },
 ]
 
