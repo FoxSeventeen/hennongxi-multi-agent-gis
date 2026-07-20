@@ -96,6 +96,8 @@ class ArtifactWriteSession:
 
         staging = self.staging_directory
         self._store._verify_result(result, staging, self.task_id, self.attempt)
+        for filename in _FILENAMES.values():
+            _fsync_file(staging / filename)
         receipt = {
             "idempotency_key": str(self.idempotency_key),
             "result": result.model_dump(mode="json"),
@@ -106,6 +108,7 @@ class ArtifactWriteSession:
             encoding="utf-8",
         )
         _fsync_file(receipt_path)
+        _fsync_directory(staging)
 
         final_directory = self._store.final_directory(self.task_id, self.attempt)
         os.replace(staging, final_directory)
