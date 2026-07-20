@@ -456,26 +456,28 @@ The critical path is contracts → persistence/events → raster chain → orche
 
 **规模：** M。
 
-#### Task 14: Implement the safe LLM planning adapter
+#### 任务 14：实现安全的大模型规划适配器
 
-**Description:** Call the configured provider-compatible endpoint, parse a JSON plan into shared schemas, enforce the fixed ecological step order/whitelist, persist sanitized call metadata, and expose clearly labeled fallback/error behavior.
+**描述：**调用已配置的兼容端点，将 JSON 计划解析为共享模式，强制固定生态监测步骤顺序与
+白名单，持久化脱敏调用元数据，并明确标记恢复计划和错误行为。
 
-**Acceptance criteria:**
+**验收标准：**
 
-- [ ] A fake HTTP provider proves successful structured planning, malformed JSON, timeout, authentication, rate-limit, and disallowed-step mappings.
-- [ ] API keys/authorization and unsafe model fields never appear in logs, database records, responses, or exceptions.
-- [ ] An opt-in smoke command performs a real configured call and records provider/model/timing/status plus response hash without secrets.
+- [x] 假 HTTP 供应商覆盖结构化成功、畸形 JSON、超时、认证、限流和非法步骤映射。
+- [ ] API Key、Authorization 和不安全模型字段不会进入日志、数据库记录、响应或异常。
+- [x] 显式真实冒烟命令完成配置调用，并只记录供应商源指纹、模型、耗时、状态、令牌数和
+  响应哈希。
 
-**Verification:**
+**验证：**
 
-- [ ] `docker compose run --rm master pytest services/master/tests -q -k llm`
-- [ ] With supplied credentials: opt-in LLM smoke test returns a whitelist-valid plan; otherwise readiness reports the exact non-secret blocker.
+- [x] `docker compose run --rm --no-deps master-agent pytest services/master/tests -q -k llm`
+- [x] 已提供凭据时，显式真实冒烟返回白名单有效计划；未配置时只报告准确的非敏感阻塞项。
 
-**Dependencies:** T02, T06.
+**依赖：**T02、T06。
 
-**Files likely touched:** `services/master/app/llm.py`, `services/master/app/planning.py`, LLM tests/fake server.
+**预计修改文件：**Master 大模型适配器、规划模块、真实冒烟入口及假供应商测试。
 
-**Estimated scope:** M.
+**规模：**M。
 
 #### Task 15: Expose task creation, query, health, and readiness APIs
 

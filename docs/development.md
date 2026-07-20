@@ -56,6 +56,20 @@ uv run --frozen python packages/contracts/scripts/generate_openapi.py
 uv run --frozen pytest packages/contracts/tests -q
 ```
 
+## 真实大模型冒烟
+
+真实冒烟只在操作员显式执行以下命令时联网，不属于默认测试套件：
+
+```bash
+docker compose run --rm --build --no-deps master-agent \
+  python -m hennongxi_master.llm_smoke
+```
+
+命令使用固定中文监测请求，只输出供应商源指纹、模型、任务/计划标识、耗时、状态、
+令牌数、响应 SHA-256 和固定步骤种类。输出不包含 API Key、Authorization、Base URL、
+供应商请求 ID、原始响应或模型生成的步骤标题。退出码 `0` 表示真实计划通过白名单校验，
+`1` 表示已脱敏的供应商/计划错误，`2` 表示配置缺失，`3` 表示未分类的内部错误。
+
 ## Compose 运行时
 
 先复制本地配置并启动 OrbStack/Docker 后端；不要把真实密钥提交到 Git：

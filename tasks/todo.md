@@ -18,7 +18,7 @@ Source of truth: `docs/spec.md` at `92e50a6`. Detailed rationale, file scope, an
     有效像元门槛；2024-08-12 替换方案已于 2026-07-19 获批。
   - 2024-08-12 COG 的 BOA 重复偏移修正已于 2026-07-20 获批；来源、日期和
     质量阈值不变。
-- [ ] G3：在真实冒烟测试/演练前，提供不提交到 Git 的大模型运行配置。
+- [x] G3：已提供不提交到 Git 的大模型运行配置，并完成脱敏真实冒烟。
 - [x] G4：在容器验证前启动 OrbStack/Docker。
 
 ## Day 1 — Contract and runnable foundation
@@ -116,10 +116,10 @@ Source of truth: `docs/spec.md` at `92e50a6`. Detailed rationale, file scope, an
   - [x] 在报告中包含任务、数据日期、计划、统计、质量、限制和校验和。
   - [x] 强制任务绑定的安全下载；输入不完整时必须显式失败。
   - [x] 通过 PDF 文本提取、页面渲染、字形、响应头和访问控制测试。
-- [ ] **T14 Implement safe LLM adapter** (depends: T02, T06; gate: G3 for real smoke)
-  - [ ] Validate fake-provider success, malformed, timeout, auth, rate-limit, and disallowed-step cases.
-  - [ ] Prove secrets/unsafe fields never reach logs, persistence, responses, or execution.
-  - [ ] Pass opt-in real smoke or record the honest non-secret readiness blocker.
+- [ ] **T14 实现安全的大模型适配器**（依赖：T02、T06；真实冒烟门禁：G3）
+  - [x] 验证假供应商成功、畸形响应、超时、认证、限流和非法步骤场景。
+  - [ ] 证明密钥与不安全字段不会进入日志、持久化、响应或执行流程。
+  - [x] 通过显式真实冒烟，或如实记录非敏感 readiness 阻塞项。
 - [ ] **T15 Expose task/query/health/readiness APIs** (depends: T03, T05-T07, T14)
   - [ ] Return `202`/unique task ID for valid Chinese input and structured validation failures.
   - [ ] Reconstruct full current task/plan/steps/events summary/results after restart.
