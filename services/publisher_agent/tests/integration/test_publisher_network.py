@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 import os
 from pathlib import Path
 from uuid import UUID
@@ -8,18 +9,34 @@ from uuid import UUID
 import httpx
 import numpy as np
 import pytest
+from hennongxi_contracts import (
+    AnalysisRunResult,
+    PublisherPublishCommand,
+    PublisherPublishResult,
+    QualityEvaluateResult,
+    TileArtifactType,
+)
 from PIL import Image
 from rio_tiler.io import Reader
 
 PUBLISHER_AGENT_BASE_URL = os.environ.get("PUBLISHER_AGENT_BASE_URL")
 ARTIFACT_ROOT_VALUE = os.environ.get("ARTIFACT_ROOT")
+QUALITY_REPORT_ROOT_VALUE = os.environ.get("QUALITY_REPORT_ROOT")
 pytestmark = pytest.mark.skipif(
-    PUBLISHER_AGENT_BASE_URL is None or ARTIFACT_ROOT_VALUE is None,
-    reason="Publisher network test requires its URL and the mounted artifact volume",
+    any(
+        value is None
+        for value in (
+            PUBLISHER_AGENT_BASE_URL,
+            ARTIFACT_ROOT_VALUE,
+            QUALITY_REPORT_ROOT_VALUE,
+        )
+    ),
+    reason="Publisher network test requires its URL and both mounted receipt volumes",
 )
 
 TASK_ID = UUID("68686868-6868-4868-8868-686868686868")
 ARTIFACT_ROOT = Path(ARTIFACT_ROOT_VALUE or "/data/outputs")
+QUALITY_REPORT_ROOT = Path(QUALITY_REPORT_ROOT_VALUE or "/data/quality-reports")
 NDVI_COLORS = {
     (216, 179, 101),
     (246, 232, 195),
@@ -66,3 +83,57 @@ def test_quality_passed_real_raster_is_served_as_a_styled_transparent_png() -> N
     assert np.any(alpha == 255)
     assert 2 <= len(opaque_colors) <= len(NDVI_COLORS)
     assert opaque_colors <= NDVI_COLORS
+
+
+def test_real_receipts_publish_complete_browser_layer_metadata() -> None:
+    assert PUBLISHER_AGENT_BASE_URL is not None
+    analysis_payload = json.loads(
+        (
+            ARTIFACT_ROOT / str(TASK_ID) / "attempt-1" / "analysis" / "analysis_result.json"
+        ).read_text(encoding="utf-8")
+    )
+    quality_payload = json.loads(
+        (
+            QUALITY_REPORT_ROOT / str(TASK_ID) / "attempt-1" / "quality" / "quality_result.json"
+        ).read_text(encoding="utf-8")
+    )
+    analysis = AnalysisRunResult.model_validate(analysis_payload["result"])
+    quality = QualityEvaluateResult.model_validate(quality_payload["result"])
+    command = PublisherPublishCommand(
+        task_id=TASK_ID,
+        step_id="publish_results",
+        attempt=1,
+        correlation_id=analysis.correlation_id,
+        artifacts=(*analysis.artifacts, quality.artifact),
+        quality=quality.metrics,
+    )
+
+    response = httpx.post(
+        f"{PUBLISHER_AGENT_BASE_URL}/internal/v1/publisher/publish",
+        json=command.model_dump(mode="json"),
+        headers={"X-Correlation-ID": str(command.correlation_id)},
+        timeout=30,
+    )
+
+    response.raise_for_status()
+    result = PublisherPublishResult.model_validate(response.json())
+    assert result.report is None
+    assert len(result.resources) == 4
+    resources = {resource.tile_metadata.artifact_type: resource for resource in result.resources}
+    assert set(resources) == set(TileArtifactType)
+    assert resources[TileArtifactType.NDVI_BEFORE].tile_metadata.start_date.isoformat() == (
+        "2019-08-19"
+    )
+    assert resources[TileArtifactType.NDVI_AFTER].tile_metadata.end_date.isoformat() == (
+        "2024-08-12"
+    )
+    difference = resources[TileArtifactType.NDVI_DIFFERENCE].tile_metadata
+    assert difference.start_date.isoformat() == "2019-08-19"
+    assert difference.end_date.isoformat() == "2024-08-12"
+    assert difference.bounds_wgs84 == pytest.approx(
+        (110.107791, 31.044477, 110.538461, 31.468514),
+        abs=1e-5,
+    )
+    assert "修改" in difference.attribution
+    assert "Copernicus" in difference.attribution
+    assert difference.legend

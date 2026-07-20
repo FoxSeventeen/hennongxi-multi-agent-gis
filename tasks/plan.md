@@ -391,32 +391,44 @@ The critical path is contracts → persistence/events → raster chain → orche
 
 **规模：** M。
 
-#### Task 12: Publish safe raster tiles and artifact metadata
+#### 任务 12：安全发布栅格瓦片与成果元数据
 
-**Description:** Use Rio-Tiler to expose allow-listed task artifacts as MapLibre-compatible PNG tiles, include color-ramp/legend/bounds metadata, and prevent traversal or cross-task artifact access.
+**说明：** Publisher 只从通过 Analysis/Quality 收据、任务作用域、字节数和 SHA-256
+复核的固定成果中读取栅格。Rio-Tiler 将四类成果渲染为 MapLibre 可用的 PNG，内部
+`publish` 命令根据批准的 G2 清单和真实栅格生成日期、WGS84 边界、单位、数据归属和
+有序图例；任何 HTTP 请求都不能提供本地路径。
 
-**Acceptance criteria:**
+**验收标准：**
 
-- [ ] Approved NDVI/difference artifacts render non-empty Web Mercator tiles with stable color scales and nodata transparency.
-- [ ] Unknown artifact types, invalid coordinates, traversal attempts, and task/artifact mismatches return structured 4xx responses.
-- [ ] Tile metadata gives the Web sufficient bounds, legend, date, units, and artifact identity to configure layers.
+- [x] 已批准的前后期 NDVI、差值和变化分级均能使用固定色带生成非空 Web Mercator
+  瓦片，nodata 像元保持透明。
+- [x] 未知成果类型、非法坐标、目录穿越、跨任务访问、收据不一致和质量未通过均返回
+  脱敏的结构化 4xx 响应。
+- [x] 四个瓦片资源均包含 Web 配置图层所需的成果身份、WGS84 边界、前后日期、单位、
+  数据归属和有序颜色图例。
 
-**Verification:**
+**验证：**
 
-- [ ] `docker compose run --rm publisher-agent pytest services/publisher_agent/tests -q -k tile`
-- [ ] Representative tile PNG dimensions/transparency/colors are asserted from a generated fixture.
+- [x] Publisher、共享契约、Compose 定向回归为 `109 passed, 2 skipped`；Ruff、格式、
+  Mypy（20 个源文件）、OpenAPI 和 Compose 配置校验均通过。
+- [x] 检查点后端全量回归为 `207 passed, 5 skipped`；仓库级 Ruff、86 个文件格式检查和
+  43 个后端源文件 Mypy 均通过。
+- [x] 生成夹具验证所有固定色带、非法 XYZ、256×256 PNG、透明度和代表性像素颜色。
+- [x] 真实 G2 成果私网测试为 `2 passed`：一项复核公开 PNG，另一项用真实
+  Analysis/Quality 收据复核四个资源的日期、边界、单位、归属和图例。
 
-**Dependencies:** T02, T04, T10 and approval of the Publisher tile route.
+**依赖：** T02、T04、T10，以及已批准的 Publisher 瓦片路由。
 
-**Files likely touched:** `services/publisher_agent/app/tiles.py`, Publisher routes/schemas, tile tests.
+**实际修改文件：** `services/publisher_agent/src/hennongxi_publisher_agent/`、Publisher
+测试、共享契约/OpenAPI、Compose 配置、开发文档和任务清单。
 
-**Estimated scope:** M.
+**规模：** M。
 
-#### Checkpoint D: GIS result chain
+#### 检查点 D：GIS 成果链
 
-- [ ] T10-T12 verification passes through three separate Agent containers.
-- [ ] One fixture request yields computed rasters, independent quality evidence, and viewable tiles.
-- [ ] Failed/partial artifacts are neither marked complete nor publicly tileable.
+- [x] T10-T12 已分别通过 Analysis、Quality、Publisher 三个独立 Agent 容器验证。
+- [x] 同一真实 G2 任务已产出计算栅格、独立质量证据、完整图层元数据和可查看瓦片。
+- [x] 失败、部分、篡改、跨任务或未通过质量检查的成果既不会标记完整，也不能公开出图。
 
 ### Phase 5: Report, LLM planning, and public task entry
 

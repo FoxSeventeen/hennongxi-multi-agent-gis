@@ -201,6 +201,7 @@ services:
     environment:
       <<: *common-agent-environment
       HEALTHCHECK_URL: http://127.0.0.1:8004/internal/v1/health
+      DATA_MANIFEST_PATH: ${DATA_MANIFEST_PATH:-/app/data/manifest.json}
       ARTIFACT_ROOT: ${ARTIFACT_ROOT:-/data/outputs}
       QUALITY_REPORT_ROOT: ${QUALITY_REPORT_ROOT:-/data/quality-reports}
     ports:

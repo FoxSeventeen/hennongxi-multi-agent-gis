@@ -52,7 +52,10 @@ def test_each_agent_exposes_only_its_approved_health_routes(
     if service_name == "quality":
         expected_paths.add("/internal/v1/quality/evaluate")
     if service_name == "publisher":
-        expected_paths.add("/api/v1/tiles/{task_id}/{artifact_type}/{z}/{x}/{y}.png")
+        expected_paths |= {
+            "/api/v1/tiles/{task_id}/{artifact_type}/{z}/{x}/{y}.png",
+            "/internal/v1/publisher/publish",
+        }
     assert application_paths == expected_paths
     with TestClient(app) as client:
         response = client.get("/internal/v1/health")

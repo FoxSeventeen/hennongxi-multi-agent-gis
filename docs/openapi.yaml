@@ -490,6 +490,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Structured error without secret or provider payload fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '503':
           description: Structured error without secret or provider payload fields.
           content:
@@ -1172,7 +1178,9 @@ components:
           type: array
           title: Resources
         report:
-          $ref: '#/components/schemas/ArtifactRef'
+          anyOf:
+          - $ref: '#/components/schemas/ArtifactRef'
+          - type: 'null'
       additionalProperties: false
       type: object
       required:
@@ -1181,7 +1189,6 @@ components:
       - attempt
       - correlation_id
       - resources
-      - report
       title: PublisherPublishResult
     QualityConclusion:
       type: string

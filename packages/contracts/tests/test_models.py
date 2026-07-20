@@ -22,6 +22,7 @@ from hennongxi_contracts import (
     PlanStepKind,
     PublishedResource,
     PublisherPublishCommand,
+    PublisherPublishResult,
     QualityConclusion,
     QualityEvaluateCommand,
     QualityEvaluateResult,
@@ -647,6 +648,62 @@ def test_publisher_command_requires_complete_passing_inputs() -> None:
             quality=_passing_quality().model_copy(
                 update={"conclusion": QualityConclusion.FAIL, "passed": False}
             ),
+        )
+
+
+def _published_tile_resources() -> tuple[PublishedResource, ...]:
+    resources = []
+    for artifact_type in TileArtifactType:
+        metadata = _tile_metadata().model_copy(
+            update={
+                "artifact_type": artifact_type,
+                "start_date": (
+                    date(2024, 8, 12)
+                    if artifact_type is TileArtifactType.NDVI_AFTER
+                    else date(2019, 8, 19)
+                ),
+                "end_date": (
+                    date(2019, 8, 19)
+                    if artifact_type is TileArtifactType.NDVI_BEFORE
+                    else date(2024, 8, 12)
+                ),
+            }
+        )
+        resources.append(
+            PublishedResource(
+                artifact_id=valid_artifact(
+                    artifact_type=ArtifactType(artifact_type.value)
+                ).artifact_id,
+                tile_template=(
+                    f"/api/v1/tiles/{TASK_ID}/{artifact_type.value}/{{z}}/{{x}}/{{y}}.png"
+                ),
+                tile_metadata=metadata,
+            )
+        )
+    return tuple(resources)
+
+
+def test_publisher_result_requires_four_tiles_but_allows_report_to_land_in_t13() -> None:
+    result = PublisherPublishResult(
+        task_id=TASK_ID,
+        step_id="publish_results",
+        attempt=1,
+        correlation_id=CORRELATION_ID,
+        resources=_published_tile_resources(),
+    )
+
+    assert result.report is None
+    assert {resource.tile_metadata.artifact_type for resource in result.resources} == set(
+        TileArtifactType
+    )
+
+    with pytest.raises(ValidationError, match="four tile resources"):
+        PublisherPublishResult(
+            task_id=TASK_ID,
+            step_id="publish_results",
+            attempt=1,
+            correlation_id=CORRELATION_ID,
+            resources=_published_tile_resources()[:-1],
         )
 
 

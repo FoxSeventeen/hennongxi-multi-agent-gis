@@ -14,6 +14,7 @@ from hennongxi_contracts import (
     ArtifactRef,
     ArtifactStatus,
     ArtifactType,
+    PublisherPublishCommand,
     QualityConclusion,
     QualityEvaluateResult,
     QualityMetrics,
@@ -270,3 +271,48 @@ def test_catalog_reuses_unchanged_file_fingerprints_without_rehashing(
     monkeypatch.setattr(catalog_module, "_sha256", fail_if_rehashed)
 
     assert catalog.resolve_tile(TASK_ID, TileArtifactType.NDVI_BEFORE) == first
+
+
+def _publish_command(analysis_root: Path, quality_root: Path) -> PublisherPublishCommand:
+    analysis_payload = json.loads(
+        (
+            analysis_root / str(TASK_ID) / "attempt-1" / "analysis" / "analysis_result.json"
+        ).read_text(encoding="utf-8")
+    )
+    quality_payload = json.loads(
+        (quality_root / str(TASK_ID) / "attempt-1" / "quality" / "quality_result.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    analysis = AnalysisRunResult.model_validate(analysis_payload["result"])
+    quality = QualityEvaluateResult.model_validate(quality_payload["result"])
+    return PublisherPublishCommand(
+        task_id=TASK_ID,
+        step_id="publish_results",
+        attempt=1,
+        correlation_id=CORRELATION_ID,
+        artifacts=(*analysis.artifacts, quality.artifact),
+        quality=quality.metrics,
+    )
+
+
+def test_catalog_resolves_publish_command_only_when_receipts_match_exactly(tmp_path: Path) -> None:
+    analysis_root = tmp_path / "outputs"
+    quality_root = tmp_path / "quality-reports"
+    _write_verified_attempt(analysis_root, quality_root)
+    command = _publish_command(analysis_root, quality_root)
+    catalog = PublisherArtifactCatalog(analysis_root, quality_root)
+
+    publication = catalog.resolve_publication(command)
+
+    assert publication.attempt == 1
+    assert publication.correlation_id == CORRELATION_ID
+    assert tuple(tile.artifact.artifact_type for tile in publication.tiles) == tuple(
+        ArtifactType(tile_type.value) for tile_type in TileArtifactType
+    )
+
+    refs = list(command.artifacts)
+    refs[0] = refs[0].model_copy(update={"checksum_sha256": "b" * 64})
+    mismatched = command.model_copy(update={"artifacts": tuple(refs)})
+    with pytest.raises(PublishedTileIntegrityError, match="integrity"):
+        catalog.resolve_publication(mismatched)

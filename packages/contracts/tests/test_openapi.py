@@ -134,3 +134,9 @@ def test_publisher_resources_expose_complete_tile_visualization_metadata() -> No
     } <= set(tile_metadata["required"])
     legend = schemas["TileLegendEntry"]
     assert {"value", "label", "color"} <= set(legend["required"])
+
+    publish_result = schemas["PublisherPublishResult"]
+    assert "resources" in publish_result["required"]
+    assert "report" not in publish_result["required"]
+    publish_operation = document["paths"]["/internal/v1/publisher/publish"]["post"]
+    assert {"409", "422", "500", "503"} <= set(publish_operation["responses"])

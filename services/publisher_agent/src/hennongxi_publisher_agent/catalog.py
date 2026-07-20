@@ -15,6 +15,7 @@ from hennongxi_contracts import (
     ArtifactRef,
     ArtifactStatus,
     ArtifactType,
+    PublisherPublishCommand,
     QualityConclusion,
     QualityEvaluateResult,
     TileArtifactType,
@@ -60,10 +61,19 @@ class ResolvedTile:
 
 
 @dataclass(frozen=True, slots=True)
+class ResolvedPublication:
+    attempt: int
+    correlation_id: UUID
+    tiles: tuple[ResolvedTile, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class _VerifiedAttempt:
     attempt: int
     paths: dict[TileArtifactType, Path]
     artifacts: dict[TileArtifactType, ArtifactRef]
+    input_artifacts: tuple[ArtifactRef, ...]
+    quality: QualityEvaluateResult
     _fingerprints: tuple[_FileFingerprint, ...] = field(
         repr=False,
         compare=False,
@@ -81,13 +91,41 @@ class PublisherArtifactCatalog:
 
     def resolve_tile(self, task_id: UUID, artifact_type: TileArtifactType) -> ResolvedTile:
         with self._lock:
-            cached = self._cache.get(task_id)
-            if cached is not None and _fingerprints_are_unchanged(cached._fingerprints):
-                return _resolved_tile(cached, artifact_type)
-            self._cache.pop(task_id, None)
-            verified = self._resolve_uncached(task_id)
-            self._cache[task_id] = verified
+            verified = self._verified_attempt(task_id)
             return _resolved_tile(verified, artifact_type)
+
+    def resolve_publication(self, command: PublisherPublishCommand) -> ResolvedPublication:
+        with self._lock:
+            verified = self._verified_attempt(command.task_id)
+            expected_artifacts = {
+                artifact.artifact_type: artifact for artifact in verified.input_artifacts
+            }
+            supplied_artifacts = {
+                artifact.artifact_type: artifact for artifact in command.artifacts
+            }
+            if (
+                verified.attempt != command.attempt
+                or verified.quality.correlation_id != command.correlation_id
+                or verified.quality.metrics != command.quality
+                or supplied_artifacts != expected_artifacts
+            ):
+                raise PublishedTileIntegrityError("published tile integrity validation failed")
+            return ResolvedPublication(
+                attempt=verified.attempt,
+                correlation_id=verified.quality.correlation_id,
+                tiles=tuple(
+                    _resolved_tile(verified, artifact_type) for artifact_type in TileArtifactType
+                ),
+            )
+
+    def _verified_attempt(self, task_id: UUID) -> _VerifiedAttempt:
+        cached = self._cache.get(task_id)
+        if cached is not None and _fingerprints_are_unchanged(cached._fingerprints):
+            return cached
+        self._cache.pop(task_id, None)
+        verified = self._resolve_uncached(task_id)
+        self._cache[task_id] = verified
+        return verified
 
     def _resolve_uncached(self, task_id: UUID) -> _VerifiedAttempt:
         task_directory = self._analysis_root / str(task_id)
@@ -172,6 +210,8 @@ class PublisherArtifactCatalog:
                 attempt=attempt,
                 paths=paths,
                 artifacts=artifacts,
+                input_artifacts=(*analysis.artifacts, quality.artifact),
+                quality=quality,
                 _fingerprints=(
                     *analysis_fingerprints,
                     *quality_fingerprints,

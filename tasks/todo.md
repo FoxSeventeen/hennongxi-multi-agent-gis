@@ -94,20 +94,20 @@ Source of truth: `docs/spec.md` at `92e50a6`. Detailed rationale, file scope, an
   - [x] 独立检查覆盖率、有效像元率、5/5 输出完整性和 Analysis 耗时，并返回阈值与中文证据。
   - [x] 缺失、损坏、篡改、网格或值域非法、统计不一致及阈值不足的成果均不能通过。
   - [x] 通过边界、好坏夹具、幂等、原子报告、HTTP 契约和真实 Data→Analysis→Quality 私网测试。
-- [ ] **T12 安全发布栅格瓦片与成果元数据**（依赖：T02、T04、T10；门禁：G1）
+- [x] **T12 安全发布栅格瓦片与成果元数据**（依赖：T02、T04、T10；门禁：G1）
   - [x] 冻结 WGS84 边界、前后日期、单位、数据归属和有序颜色图例契约，并拒绝不完整或质量未通过的发布输入。
   - [x] 实现与 HTTP 解耦的 Rio-Tiler 渲染核心，固定 NDVI/差值/分级色带、XYZ 边界与 256×256 PNG nodata 透明度。
   - [x] 只读复核 Analysis/Quality 收据、作用域、PASS 结论、字节数和 SHA-256，并用文件指纹安全缓存已验证成果。
   - [x] 通过公共只读路由渲染固定色带、nodata 透明的 NDVI/差值/分级瓦片。
   - [x] 拒绝目录穿越、非法坐标/类型、跨任务成果及未通过质量检查的访问。
   - [x] 通过瓦片响应契约、代表性 PNG 颜色/透明度断言和真实 G2 成果网络验收。
-  - [ ] 通过内部 publish 命令生成四个包含边界、日期、单位、图例和成果身份的资源元数据。
+  - [x] 通过内部 publish 命令生成四个包含边界、日期、单位、图例和成果身份的资源元数据。
 
-### Checkpoint D
+### 检查点 D
 
-- [ ] T10-T12 pass across three distinct Agent containers.
-- [ ] One fixture yields computed rasters, quality evidence, and viewable tiles.
-- [ ] Partial/failed artifacts are neither complete nor publicly tileable.
+- [x] T10-T12 已分别通过 Analysis、Quality、Publisher 三个独立 Agent 容器验证。
+- [x] 同一真实 G2 任务已产出计算栅格、独立质量证据、完整图层元数据和可查看瓦片。
+- [x] 部分、失败、篡改、跨任务或未通过质量检查的成果均不能作为完整成果公开出图。
 
 ## Day 5 — Report, LLM, and public task entry
 

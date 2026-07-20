@@ -242,7 +242,7 @@ def create_contract_app() -> FastAPI:
         operation_id="publishResults",
         tags=["Internal Agent"],
         response_model=PublisherPublishResult,
-        responses=_errors(409, 422, 503),
+        responses=_errors(409, 422, 500, 503),
     )
     def publish_results(
         command: Annotated[PublisherPublishCommand, Body()],

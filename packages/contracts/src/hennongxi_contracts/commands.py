@@ -13,6 +13,7 @@ from hennongxi_contracts.artifacts import (
     ArtifactRef,
     ArtifactStatus,
     ArtifactType,
+    TileArtifactType,
     TileMetadata,
 )
 from hennongxi_contracts.common import (
@@ -308,9 +309,47 @@ class PublisherPublishResult(ContractModel):
     attempt: int = Field(ge=1)
     correlation_id: UUID
     resources: tuple[PublishedResource, ...]
-    report: ArtifactRef
+    report: ArtifactRef | None = None
 
     @model_validator(mode="after")
     def require_artifact_scope(self) -> Self:
+        if self.step_id != "publish_results":
+            raise ValueError("publisher result requires the publish_results step")
+        tile_resources = tuple(
+            resource for resource in self.resources if resource.tile_template is not None
+        )
+        tile_types = tuple(
+            resource.tile_metadata.artifact_type
+            for resource in tile_resources
+            if resource.tile_metadata is not None
+        )
+        if len(tile_resources) != 4 or set(tile_types) != set(TileArtifactType):
+            raise ValueError("publisher result requires exactly four tile resources")
+        for resource in tile_resources:
+            expected_prefix = f"/api/v1/tiles/{self.task_id}/"
+            if resource.tile_template is None or not resource.tile_template.startswith(
+                expected_prefix
+            ):
+                raise ValueError("publisher tile resources must belong to the result task")
+
+        download_resources = tuple(
+            resource for resource in self.resources if resource.download_path is not None
+        )
+        if self.report is None:
+            if download_resources:
+                raise ValueError("publisher download resources require a report")
+            return self
+
         _require_artifact_scope(self.task_id, self.attempt, (self.report,))
+        if (
+            self.report.artifact_type is not ArtifactType.PDF_REPORT
+            or self.report.status is not ArtifactStatus.COMPLETE
+            or self.report.media_type != "application/pdf"
+        ):
+            raise ValueError("publisher report must be a complete PDF artifact")
+        if (
+            len(download_resources) != 1
+            or download_resources[0].artifact_id != self.report.artifact_id
+        ):
+            raise ValueError("publisher report requires one matching download resource")
         return self

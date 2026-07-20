@@ -101,6 +101,14 @@ def test_shared_storage_has_least_privilege_access_modes() -> None:
     assert "volumes" not in services["master-agent"]
 
 
+def test_publisher_uses_the_same_approved_data_manifest_as_upstream_agents() -> None:
+    services = load_compose()["services"]
+    expected = "${DATA_MANIFEST_PATH:-/app/data/manifest.json}"
+
+    for service_name in ("data-agent", "analysis-agent", "quality-agent", "publisher-agent"):
+        assert services[service_name]["environment"]["DATA_MANIFEST_PATH"] == expected
+
+
 def test_dependencies_wait_for_healthy_services_without_cycles() -> None:
     services = load_compose()["services"]
 
