@@ -161,9 +161,12 @@ class AnalysisArtifactStore:
                 )
                 return
 
+            for stale_path in attempt_directory.glob(".analysis-staging-*"):
+                if stale_path.is_dir() and not stale_path.is_symlink():
+                    shutil.rmtree(stale_path)
+                else:
+                    stale_path.unlink(missing_ok=True)
             staging_directory = attempt_directory / f".analysis-staging-{os.getpid()}"
-            if staging_directory.exists():
-                shutil.rmtree(staging_directory)
             staging_directory.mkdir()
             session = ArtifactWriteSession(
                 self,

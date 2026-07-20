@@ -87,6 +87,19 @@ def test_failed_session_removes_staging_without_publishing_partial_artifacts(
     assert not tuple(attempt_directory.glob(".analysis-staging-*"))
 
 
+def test_new_session_removes_staging_left_by_a_crashed_process(tmp_path: Path) -> None:
+    store = AnalysisArtifactStore(tmp_path)
+    attempt_directory = store.final_directory(TASK_ID, 1).parent
+    stale_directory = attempt_directory / ".analysis-staging-previous-process"
+    stale_directory.mkdir(parents=True)
+    (stale_directory / "partial.tif").write_bytes(b"partial")
+
+    with store.session(TASK_ID, 1, IDEMPOTENCY_KEY):
+        assert not stale_directory.exists()
+
+    assert not tuple(attempt_directory.glob(".analysis-staging-*"))
+
+
 def test_corrupt_published_artifact_is_never_reused(tmp_path: Path) -> None:
     store = AnalysisArtifactStore(tmp_path)
     with store.session(TASK_ID, 1, IDEMPOTENCY_KEY) as session:
