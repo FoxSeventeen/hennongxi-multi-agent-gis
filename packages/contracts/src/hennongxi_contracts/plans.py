@@ -54,9 +54,11 @@ class ModelCallRecord(ContractModel):
     error_code: ShortText | None = None
 
     @model_validator(mode="after")
-    def require_success_hash(self) -> Self:
+    def require_status_evidence(self) -> Self:
         if self.status is ModelCallStatus.SUCCEEDED and self.response_sha256 is None:
             raise ValueError("successful model call requires response_sha256")
+        if self.status is ModelCallStatus.FAILED and self.error_code is None:
+            raise ValueError("failed model call requires error_code")
         return self
 
 
@@ -100,8 +102,10 @@ class ExecutionPlan(ContractModel):
             if step.depends_on != expected_dependencies:
                 raise ValueError("plan steps must form the approved dependency chain")
 
-        if self.source is PlanSource.REAL_LLM and self.model_call is None:
-            raise ValueError("REAL_LLM plan requires model_call evidence")
+        if self.source is PlanSource.REAL_LLM and (
+            self.model_call is None or self.model_call.status is not ModelCallStatus.SUCCEEDED
+        ):
+            raise ValueError("REAL_LLM plan requires succeeded model_call evidence")
         if self.source is PlanSource.BUILTIN_RECOVERY and self.model_call is not None:
             raise ValueError("BUILTIN_RECOVERY plan cannot claim model_call evidence")
         return self

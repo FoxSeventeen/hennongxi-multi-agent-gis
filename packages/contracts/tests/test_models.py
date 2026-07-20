@@ -153,6 +153,36 @@ def test_real_plan_requires_sanitized_model_call_evidence() -> None:
         )
 
 
+def test_real_plan_requires_a_succeeded_model_call() -> None:
+    failed_call = ModelCallRecord(
+        model="approved-model",
+        started_at=NOW,
+        duration_ms=250,
+        status=ModelCallStatus.FAILED,
+        error_code="LLM_TIMEOUT",
+    )
+
+    with pytest.raises(ValidationError, match="succeeded model_call"):
+        ExecutionPlan(
+            plan_id=PLAN_ID,
+            task_id=TASK_ID,
+            source=PlanSource.REAL_LLM,
+            created_at=NOW,
+            model_call=failed_call,
+            steps=valid_plan_steps(),
+        )
+
+
+def test_failed_model_call_requires_a_safe_error_code() -> None:
+    with pytest.raises(ValidationError, match="failed model call requires error_code"):
+        ModelCallRecord(
+            model="approved-model",
+            started_at=NOW,
+            duration_ms=250,
+            status=ModelCallStatus.FAILED,
+        )
+
+
 def test_model_call_rejects_secrets_and_provider_payloads() -> None:
     payload = valid_model_call().model_dump(mode="json")
     payload["api_key"] = "secret"

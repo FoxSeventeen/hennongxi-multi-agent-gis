@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from io import StringIO
 from uuid import UUID
 
@@ -64,3 +65,17 @@ def test_request_log_is_json_traceable_and_does_not_include_query_secrets() -> N
     assert completed["path"] == "/probe"
     assert completed["status_code"] == 200
     assert "must-not-be-logged" not in stream.getvalue()
+
+
+def test_external_http_access_logs_are_dropped_before_secrets_can_render() -> None:
+    stream = StringIO()
+    configure_logging(stream=stream)
+    private_value = "private-authorization-value"
+
+    logging.getLogger("httpx").warning("Authorization: Bearer %s", private_value)
+    logging.getLogger("hennongxi.master").warning("safe model-call status")
+
+    rendered = stream.getvalue()
+    assert "safe model-call status" in rendered
+    assert private_value not in rendered
+    assert "Authorization" not in rendered

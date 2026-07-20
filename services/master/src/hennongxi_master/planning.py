@@ -18,6 +18,12 @@ from hennongxi_contracts.plans import STEP_AGENT
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 MAX_PROVIDER_CONTENT_CHARS = 20_000
+_RECOVERY_STEP_DEFINITIONS: tuple[tuple[PlanStepKind, str], ...] = (
+    (PlanStepKind.PREPARE_DATA, "准备权威流域与双时相影像"),
+    (PlanStepKind.ANALYZE_NDVI_CHANGE, "计算 NDVI 与变化分级"),
+    (PlanStepKind.EVALUATE_QUALITY, "独立核验成果质量"),
+    (PlanStepKind.PUBLISH_RESULTS, "发布地图与中文报告"),
+)
 
 
 class LlmPlanValidationError(ValueError):
@@ -67,17 +73,7 @@ def build_llm_execution_plan(
 
     try:
         provider_plan = _ProviderPlan.model_validate_json(provider_content)
-        steps = tuple(
-            PlanStep(
-                step_id=provider_step.kind.value,
-                kind=provider_step.kind,
-                agent=STEP_AGENT[provider_step.kind],
-                order=order,
-                title=provider_step.title,
-                depends_on=(() if order == 1 else (provider_plan.steps[order - 2].kind.value,)),
-            )
-            for order, provider_step in enumerate(provider_plan.steps, start=1)
-        )
+        steps = _build_fixed_steps(tuple((step.kind, step.title) for step in provider_plan.steps))
         return ExecutionPlan(
             plan_id=plan_id,
             task_id=task_id,
@@ -88,3 +84,36 @@ def build_llm_execution_plan(
         )
     except ValidationError:
         raise LlmPlanValidationError() from None
+
+
+def build_builtin_recovery_plan(
+    *,
+    task_id: UUID,
+    plan_id: UUID,
+    created_at: UtcDateTime,
+) -> ExecutionPlan:
+    """Build the fixed local plan without claiming successful model evidence."""
+
+    return ExecutionPlan(
+        plan_id=plan_id,
+        task_id=task_id,
+        source=PlanSource.BUILTIN_RECOVERY,
+        created_at=created_at,
+        steps=_build_fixed_steps(_RECOVERY_STEP_DEFINITIONS),
+    )
+
+
+def _build_fixed_steps(
+    definitions: tuple[tuple[PlanStepKind, str], ...],
+) -> tuple[PlanStep, ...]:
+    return tuple(
+        PlanStep(
+            step_id=kind.value,
+            kind=kind,
+            agent=STEP_AGENT[kind],
+            order=order,
+            title=title,
+            depends_on=(() if order == 1 else (definitions[order - 2][0].value,)),
+        )
+        for order, (kind, title) in enumerate(definitions, start=1)
+    )

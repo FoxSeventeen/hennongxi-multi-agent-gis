@@ -464,13 +464,14 @@ The critical path is contracts → persistence/events → raster chain → orche
 **验收标准：**
 
 - [x] 假 HTTP 供应商覆盖结构化成功、畸形 JSON、超时、认证、限流和非法步骤映射。
-- [ ] API Key、Authorization 和不安全模型字段不会进入日志、数据库记录、响应或异常。
+- [x] API Key、Authorization 和不安全模型字段不会进入日志、数据库记录、响应或异常。
 - [x] 显式真实冒烟命令完成配置调用，并只记录供应商源指纹、模型、耗时、状态、令牌数和
   响应哈希。
 
 **验证：**
 
 - [x] `docker compose run --rm --no-deps master-agent pytest services/master/tests -q -k llm`
+- [x] PostGIS 仓库集成测试证明脱敏失败元数据与恢复计划同一事务落库，非法组合不留下部分记录。
 - [x] 已提供凭据时，显式真实冒烟返回白名单有效计划；未配置时只报告准确的非敏感阻塞项。
 
 **依赖：**T02、T06。

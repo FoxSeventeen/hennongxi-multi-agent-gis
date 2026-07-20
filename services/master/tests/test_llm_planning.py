@@ -12,7 +12,11 @@ from hennongxi_contracts import (
     PlanSource,
     PlanStepKind,
 )
-from hennongxi_master.planning import LlmPlanValidationError, build_llm_execution_plan
+from hennongxi_master.planning import (
+    LlmPlanValidationError,
+    build_builtin_recovery_plan,
+    build_llm_execution_plan,
+)
 
 TASK_ID = UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
 PLAN_ID = UUID("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
@@ -67,6 +71,30 @@ def test_llm_plan_builds_only_the_fixed_local_execution_chain() -> None:
         "analyze_ndvi_change",
         "evaluate_quality",
         "publish_results",
+    )
+    assert tuple(step.depends_on for step in plan.steps) == (
+        (),
+        ("prepare_data",),
+        ("analyze_ndvi_change",),
+        ("evaluate_quality",),
+    )
+
+
+def test_builtin_recovery_plan_is_fixed_and_explicitly_labeled() -> None:
+    plan = build_builtin_recovery_plan(
+        task_id=TASK_ID,
+        plan_id=PLAN_ID,
+        created_at=NOW,
+    )
+
+    assert plan.source is PlanSource.BUILTIN_RECOVERY
+    assert plan.model_call is None
+    assert tuple(step.kind for step in plan.steps) == tuple(PlanStepKind)
+    assert tuple(step.title for step in plan.steps) == (
+        "准备权威流域与双时相影像",
+        "计算 NDVI 与变化分级",
+        "独立核验成果质量",
+        "发布地图与中文报告",
     )
     assert tuple(step.depends_on for step in plan.steps) == (
         (),

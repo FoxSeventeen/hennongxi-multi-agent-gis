@@ -13,6 +13,9 @@ from hennongxi_contracts import (
     ArtifactType,
     CreateTaskRequest,
     ExecutionPlan,
+    ModelCallRecord,
+    ModelCallStatus,
+    PlanSource,
     PlanStepKind,
     StepStatus,
     StructuredError,
@@ -232,7 +235,21 @@ class TaskRepository:
             raise RuntimeError("created task could not be reconstructed")
         return result
 
-    async def save_plan(self, plan: ExecutionPlan, *, attempt: int) -> None:
+    async def save_plan(
+        self,
+        plan: ExecutionPlan,
+        *,
+        attempt: int,
+        failed_model_call: ModelCallRecord | None = None,
+    ) -> None:
+        if failed_model_call is not None and (
+            plan.source is not PlanSource.BUILTIN_RECOVERY
+            or failed_model_call.status is not ModelCallStatus.FAILED
+        ):
+            raise ValueError(
+                "failed_model_call requires a BUILTIN_RECOVERY plan and FAILED evidence"
+            )
+        model_call = failed_model_call or plan.model_call
         payload = plan.model_dump(mode="json")
         async with self._sessions.begin() as session:
             await session.execute(
@@ -250,8 +267,7 @@ class TaskRepository:
                     "created_at": plan.created_at,
                 },
             )
-            if plan.model_call is not None:
-                model_call = plan.model_call
+            if model_call is not None:
                 await session.execute(
                     text(
                         "INSERT INTO model_calls "

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
+import httpx
 import pytest
 import pytest_asyncio
 from hennongxi_contracts import (
@@ -24,6 +26,8 @@ from hennongxi_contracts import (
     TaskStatus,
 )
 from hennongxi_contracts.state import InvalidTaskTransition
+from hennongxi_master.llm import LlmConfig, LlmPlanningAdapter, LlmPlanningError
+from hennongxi_master.planning import build_builtin_recovery_plan
 from hennongxi_master.repository import (
     ArtifactCreate,
     RepositoryConflict,
@@ -258,6 +262,97 @@ async def test_repository_persists_and_reconstructs_complete_current_graph(
             )
         )
     assert {"api_key", "prompt", "response_body"}.isdisjoint(columns)
+
+
+@pytest.mark.asyncio
+async def test_repository_atomically_persists_only_sanitized_failed_llm_evidence(
+    repository: TaskRepository,
+    engine: AsyncEngine,
+) -> None:
+    await create_pending_task(repository)
+    private_credential = "private-provider-credential"
+    private_base_url = "https://private-provider.example/v1"
+    private_response = "private-provider-response-body"
+    config = LlmConfig.from_environment(
+        {
+            "LLM_API_KEY": private_credential,
+            "LLM_BASE_URL": private_base_url,
+            "LLM_MODEL": "approved-model",
+        }
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(401, text=private_response)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(LlmPlanningError) as raised:
+            await LlmPlanningAdapter(config, client).create_plan(
+                task_id=TASK_ID,
+                query="分析神农溪植被变化",
+            )
+
+    recovery_plan = build_builtin_recovery_plan(
+        task_id=TASK_ID,
+        plan_id=PLAN_ID,
+        created_at=NOW,
+    )
+    await repository.save_plan(
+        recovery_plan,
+        attempt=1,
+        failed_model_call=raised.value.model_call,
+    )
+
+    async with engine.connect() as connection:
+        row = (
+            (
+                await connection.execute(
+                    text("SELECT * FROM model_calls WHERE plan_id = :plan_id"),
+                    {"plan_id": PLAN_ID},
+                )
+            )
+            .mappings()
+            .one()
+        )
+    persisted = json.dumps(dict(row), default=str)
+    reconstructed = await repository.get_task(TASK_ID)
+
+    assert reconstructed is not None
+    assert reconstructed.plan == recovery_plan
+    assert row["model"] == "approved-model"
+    assert row["status"] == "FAILED"
+    assert row["error_code"] == "LLM_AUTHENTICATION_FAILED"
+    assert row["response_sha256"] is None
+    for private_value in (private_credential, private_base_url, private_response):
+        assert private_value not in persisted
+        assert private_value not in reconstructed.model_dump_json()
+
+
+@pytest.mark.asyncio
+async def test_repository_rejects_mismatched_recovery_evidence_without_partial_rows(
+    repository: TaskRepository,
+    engine: AsyncEngine,
+) -> None:
+    await create_pending_task(repository)
+    recovery_plan = build_builtin_recovery_plan(
+        task_id=TASK_ID,
+        plan_id=PLAN_ID,
+        created_at=NOW,
+    )
+    succeeded_call = plan().model_call
+    assert succeeded_call is not None
+
+    with pytest.raises(ValueError, match="failed_model_call"):
+        await repository.save_plan(
+            recovery_plan,
+            attempt=1,
+            failed_model_call=succeeded_call,
+        )
+
+    async with engine.connect() as connection:
+        plan_count = await connection.scalar(text("SELECT count(*) FROM plans"))
+        call_count = await connection.scalar(text("SELECT count(*) FROM model_calls"))
+        step_count = await connection.scalar(text("SELECT count(*) FROM steps"))
+    assert (plan_count, call_count, step_count) == (0, 0, 0)
 
 
 @pytest.mark.asyncio

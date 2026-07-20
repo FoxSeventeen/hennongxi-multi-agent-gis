@@ -116,10 +116,11 @@ Source of truth: `docs/spec.md` at `92e50a6`. Detailed rationale, file scope, an
   - [x] 在报告中包含任务、数据日期、计划、统计、质量、限制和校验和。
   - [x] 强制任务绑定的安全下载；输入不完整时必须显式失败。
   - [x] 通过 PDF 文本提取、页面渲染、字形、响应头和访问控制测试。
-- [ ] **T14 实现安全的大模型适配器**（依赖：T02、T06；真实冒烟门禁：G3）
+- [x] **T14 实现安全的大模型适配器**（依赖：T02、T06；真实冒烟门禁：G3）
   - [x] 验证假供应商成功、畸形响应、超时、认证、限流和非法步骤场景。
-  - [ ] 证明密钥与不安全字段不会进入日志、持久化、响应或执行流程。
+  - [x] 证明密钥与不安全字段不会进入日志、持久化、响应或执行流程。
   - [x] 通过显式真实冒烟，或如实记录非敏感 readiness 阻塞项。
+  - [x] 通过 PostGIS 集成测试证明脱敏失败元数据与恢复计划原子落库，非法组合完全回滚。
 - [ ] **T15 Expose task/query/health/readiness APIs** (depends: T03, T05-T07, T14)
   - [ ] Return `202`/unique task ID for valid Chinese input and structured validation failures.
   - [ ] Reconstruct full current task/plan/steps/events summary/results after restart.
