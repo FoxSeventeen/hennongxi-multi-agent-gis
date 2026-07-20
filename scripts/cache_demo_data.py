@@ -67,9 +67,15 @@ class Acquisition:
     processing_baseline: str
     scale: float
     offset: float
+    boa_offset_applied: bool
     red: SourceCog
     nir: SourceCog
     scl: SourceCog
+
+    @property
+    def effective_offset(self) -> float:
+        """Return the offset still required for the provider COG pixels."""
+        return 0.0 if self.boa_offset_applied else self.offset
 
 
 _SENTINEL_COGS = "https://sentinel-cogs.s3.us-west-2.amazonaws.com/sentinel-s2-l2a-cogs/49/R/DQ"
@@ -88,6 +94,7 @@ DEFAULT_ACQUISITIONS = (
         processing_baseline="02.13",
         scale=0.0001,
         offset=0.0,
+        boa_offset_applied=False,
         red=SourceCog(
             href=f"{_BEFORE_PREFIX}/B04.tif",
             byte_size=213_701_170,
@@ -115,6 +122,7 @@ DEFAULT_ACQUISITIONS = (
         processing_baseline="05.11",
         scale=0.0001,
         offset=-0.1,
+        boa_offset_applied=True,
         red=SourceCog(
             href=f"{_AFTER_PREFIX}/B04.tif",
             byte_size=209_096_458,
@@ -361,16 +369,22 @@ def _write_output(
     with rasterio.open(temporary, "w", **profile) as destination:
         destination.write(values, 1)
         destination.set_band_description(1, logical_id)
-        destination.update_tags(
-            logical_id=logical_id,
-            acquired_on=acquisition.acquired_on.isoformat(),
-            source_item_id=acquisition.item_id,
-            source_product_id=acquisition.product_id,
-            source_band=band_number,
-            reflectance_scale=str(acquisition.scale),
-            reflectance_offset=str(acquisition.offset),
-            scl_masked_classes=",".join(str(value) for value in sorted(MASKED_SCL_CLASSES)),
-        )
+        tags = {
+            "logical_id": logical_id,
+            "acquired_on": acquisition.acquired_on.isoformat(),
+            "source_item_id": acquisition.item_id,
+            "source_product_id": acquisition.product_id,
+            "source_band": band_number,
+            "reflectance_scale": str(acquisition.scale),
+            "reflectance_offset": str(acquisition.effective_offset),
+            "scl_masked_classes": ",".join(str(value) for value in sorted(MASKED_SCL_CLASSES)),
+        }
+        if acquisition.boa_offset_applied:
+            tags.update(
+                source_raster_offset=str(acquisition.offset),
+                boa_offset_applied="true",
+            )
+        destination.update_tags(**tags)
         if min(grid.width, grid.height) >= 512:
             factors = [
                 factor for factor in (2, 4, 8, 16) if min(grid.width, grid.height) // factor >= 1
@@ -399,7 +413,7 @@ def _process_acquisition(
                 scl,
                 grid.inside_watershed,
                 scale=acquisition.scale,
-                offset=acquisition.offset,
+                offset=acquisition.effective_offset,
                 source_nodata=source.nodata,
                 output_nodata=OUTPUT_NODATA,
             )
@@ -486,6 +500,25 @@ def _asset_metadata(path: Path) -> dict[str, object]:
         }
 
 
+def _raster_derivation(acquisition: Acquisition) -> str:
+    masked_classes = ",".join(str(value) for value in sorted(MASKED_SCL_CLASSES))
+    if not acquisition.boa_offset_applied:
+        return (
+            "Contains modified Copernicus Sentinel data "
+            f"{acquisition.acquired_on.year}. Range-read watershed crop; "
+            f"reflectance=DN*{acquisition.scale}{acquisition.offset:+g}; SCL classes "
+            f"{masked_classes} and pixels outside the watershed set to -9999 nodata."
+        )
+    return (
+        "Contains modified Copernicus Sentinel data "
+        f"{acquisition.acquired_on.year}. Range-read watershed crop; source raster "
+        f"scale={acquisition.scale} and offset={acquisition.offset:+g}; provider COG BOA "
+        f"offset already applied={str(acquisition.boa_offset_applied).lower()}; "
+        f"reflectance=COG_DN*{acquisition.scale}{acquisition.effective_offset:+g}; "
+        f"SCL classes {masked_classes} and pixels outside the watershed set to -9999 nodata."
+    )
+
+
 def _build_manifest(
     *,
     boundary_path: Path,
@@ -550,14 +583,7 @@ def _build_manifest(
                         _source_record(acquisition, source, band_number),
                         _source_record(acquisition, acquisition.scl, "SCL"),
                     ],
-                    "derivation": (
-                        "Contains modified Copernicus Sentinel data "
-                        f"{acquisition.acquired_on.year}. "
-                        f"Range-read watershed crop; reflectance=DN*{acquisition.scale}"
-                        f"{acquisition.offset:+g}; SCL classes "
-                        f"{','.join(str(value) for value in sorted(MASKED_SCL_CLASSES))} and "
-                        "pixels outside the watershed set to -9999 nodata."
-                    ),
+                    "derivation": _raster_derivation(acquisition),
                 }
             )
 
@@ -607,34 +633,88 @@ def _manifest_matches_approval(
     if manifest.approval.approved_on != approval_date:
         return False
 
+    return all(_manifest_matches_acquisition(manifest, acquisition) for acquisition in acquisitions)
+
+
+def _manifest_matches_acquisition(
+    manifest: DatasetManifest,
+    acquisition: Acquisition,
+) -> bool:
+    """Check one acquisition's approved source and normalization identity."""
+
     by_id = {asset.logical_id.value: asset for asset in manifest.assets}
-    for acquisition in acquisitions:
-        for band, band_number, source in (
-            ("red", "B04", acquisition.red),
-            ("nir", "B08", acquisition.nir),
+    for band, band_number, source in (
+        ("red", "B04", acquisition.red),
+        ("nir", "B08", acquisition.nir),
+    ):
+        asset = by_id.get(f"{acquisition.role}_{band}")
+        if (
+            asset is None
+            or asset.acquired_on != acquisition.acquired_on
+            or asset.derivation != _raster_derivation(acquisition)
+            or asset.path != f"{acquisition.role}_{band}.tif"
         ):
-            asset = by_id.get(f"{acquisition.role}_{band}")
-            if asset is None or asset.acquired_on != acquisition.acquired_on:
-                return False
-            expected_sources = (
-                (source, band_number),
-                (acquisition.scl, "SCL"),
-            )
-            if len(asset.source_assets) != len(expected_sources):
-                return False
-            for recorded, (expected, asset_name) in zip(
-                asset.source_assets,
-                expected_sources,
-                strict=True,
+            return False
+        expected_sources = (
+            (source, band_number),
+            (acquisition.scl, "SCL"),
+        )
+        if len(asset.source_assets) != len(expected_sources):
+            return False
+        for recorded, (expected, asset_name) in zip(
+            asset.source_assets,
+            expected_sources,
+            strict=True,
+        ):
+            if (
+                recorded.product_id != f"{acquisition.product_id}/{asset_name}"
+                or str(recorded.url) != expected.href
+                or recorded.byte_size != expected.byte_size
+                or recorded.etag != expected.etag
             ):
-                if (
-                    recorded.product_id != f"{acquisition.product_id}/{asset_name}"
-                    or str(recorded.url) != expected.href
-                    or recorded.byte_size != expected.byte_size
-                    or recorded.etag != expected.etag
-                ):
-                    return False
+                return False
     return True
+
+
+def _cached_acquisition_is_current(
+    manifest: DatasetManifest,
+    acquisition: Acquisition,
+    cache_dir: Path,
+) -> bool:
+    if not _manifest_matches_acquisition(manifest, acquisition):
+        return False
+    by_id = {asset.logical_id.value: asset for asset in manifest.assets}
+    for band in ("red", "nir"):
+        asset = by_id[f"{acquisition.role}_{band}"]
+        path = cache_dir / asset.path
+        if (
+            path.is_symlink()
+            or not path.is_file()
+            or path.stat().st_size != asset.byte_size
+            or _sha256(path) != asset.sha256
+        ):
+            return False
+    return True
+
+
+def _cached_boundary_is_current(
+    manifest: DatasetManifest,
+    boundary_path: Path,
+    data_root: Path,
+) -> bool:
+    by_id = {asset.logical_id.value: asset for asset in manifest.assets}
+    asset = by_id.get("watershed")
+    if asset is None or boundary_path.is_symlink() or not boundary_path.is_file():
+        return False
+    try:
+        expected_path = boundary_path.relative_to(data_root).as_posix()
+    except ValueError:
+        return False
+    return bool(
+        asset.path == expected_path
+        and boundary_path.stat().st_size == asset.byte_size
+        and _sha256(boundary_path) == asset.sha256
+    )
 
 
 def build_cache(
@@ -647,6 +727,16 @@ def build_cache(
     approval_date: date,
     source_cache_dir: Path | None = None,
 ) -> CacheResult:
+    existing_manifest: DatasetManifest | None = None
+    if manifest_path.is_file():
+        try:
+            candidate = load_manifest(manifest_path)
+        except ManifestValidationError:
+            pass
+        else:
+            if candidate.approval.approved_on == approval_date:
+                existing_manifest = candidate
+
     if manifest_path.is_file() and _manifest_matches_approval(
         manifest_path,
         acquisitions,
@@ -675,9 +765,31 @@ def build_cache(
 
     boundary = _load_boundary(boundary_path)
     cache_dir.mkdir(parents=True, exist_ok=True)
+    preserve_before = bool(
+        existing_manifest is not None
+        and _cached_boundary_is_current(existing_manifest, boundary_path, data_root)
+        and _cached_acquisition_is_current(existing_manifest, before, cache_dir)
+    )
     with _raster_env():
         grid = _output_grid(before.red.source, boundary)
         for acquisition in (before, after):
+            can_preserve = preserve_before and (
+                acquisition.role == "before"
+                or (
+                    existing_manifest is not None
+                    and _cached_acquisition_is_current(
+                        existing_manifest,
+                        acquisition,
+                        cache_dir,
+                    )
+                )
+            )
+            if can_preserve:
+                print(
+                    f"Reusing verified {acquisition.role} acquisition {acquisition.acquired_on}...",
+                    flush=True,
+                )
+                continue
             print(
                 f"Preparing {acquisition.role} acquisition {acquisition.acquired_on}...",
                 flush=True,

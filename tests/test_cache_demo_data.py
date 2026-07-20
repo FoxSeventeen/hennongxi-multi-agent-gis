@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from dataclasses import replace
@@ -62,6 +63,8 @@ def test_default_acquisitions_are_the_exact_g2_approved_sources() -> None:
     assert after.cloud_cover == pytest.approx(6.090892)
     assert after.scale == pytest.approx(0.0001)
     assert after.offset == pytest.approx(-0.1)
+    assert after.boa_offset_applied is True
+    assert after.effective_offset == pytest.approx(0.0)
     assert (after.red.byte_size, after.red.etag) == (
         209_096_458,
         '"a55dd5415755e8cbe5d6ae47a9b52a93-25"',
@@ -199,6 +202,7 @@ def _acquisitions(tmp_path: Path) -> tuple[Acquisition, Acquisition]:
                 processing_baseline="test",
                 scale=scale,
                 offset=offset,
+                boa_offset_applied=role == "after",
                 red=_cog(red_path, f"{role}-red"),
                 nir=_cog(nir_path, f"{role}-nir"),
                 scl=_cog(scl_path, f"{role}-scl"),
@@ -227,6 +231,23 @@ def test_normalize_reflectance_applies_scale_offset_and_all_masks() -> None:
     assert result[0, 1] == -9999.0  # cloud in SCL
     assert result[1, 0] == -9999.0  # outside watershed
     assert result[1, 1] == pytest.approx(0.2)
+
+
+def test_applied_boa_offset_is_not_subtracted_twice() -> None:
+    after = DEFAULT_ACQUISITIONS[1]
+    raw = np.array([[283]], dtype=np.uint16)
+
+    result = normalize_reflectance(
+        raw,
+        np.array([[4]], dtype=np.uint8),
+        np.array([[True]]),
+        scale=after.scale,
+        offset=after.effective_offset,
+        source_nodata=0,
+        output_nodata=-9999.0,
+    )
+
+    assert result[0, 0] == pytest.approx(0.0283)
 
 
 def test_build_cache_writes_preflight_clean_manifest_and_reuses_it_offline(
@@ -261,12 +282,26 @@ def test_build_cache_writes_preflight_clean_manifest_and_reuses_it_offline(
     report = run_preflight(manifest_path, data_root=data_root, cache_dir=cache_dir)
     assert report.ok, report.format()
 
+    by_id = {asset.logical_id.value: asset for asset in manifest.assets}
+    assert by_id["before_red"].derivation == (
+        "Contains modified Copernicus Sentinel data 2019. Range-read watershed crop; "
+        "reflectance=DN*0.0001+0; SCL classes 0,1,3,8,9,10,11 and pixels outside the "
+        "watershed set to -9999 nodata."
+    )
+    assert "provider COG BOA offset already applied=true" in by_id["after_red"].derivation
+
     with rasterio.open(cache_dir / "before_red.tif") as before_red:
         values = before_red.read([1])[0]
         assert before_red.dtypes == ("float32",)
         assert before_red.nodata == -9999.0
         assert values[0, 0] == pytest.approx(0.1)
         assert values[0, -1] == -9999.0
+
+    with rasterio.open(cache_dir / "after_red.tif") as after_red:
+        values = after_red.read([1])[0]
+        assert values[0, 0] == pytest.approx(0.1)
+        assert after_red.tags()["reflectance_offset"] == "0.0"
+        assert after_red.tags()["source_raster_offset"] == "-0.1"
 
     for source in tmp_path.joinpath("sources").glob("*.tif"):
         source.unlink()
@@ -331,3 +366,43 @@ def test_build_cache_invalidates_clean_manifest_when_approved_sources_change(
         str(asset.source_assets[0].url).startswith("https://example.test/replacement/")
         for asset in after_assets
     )
+
+
+def test_build_cache_preserves_before_files_when_only_after_normalization_changes(
+    tmp_path: Path,
+) -> None:
+    data_root = tmp_path / "data"
+    cache_dir = data_root / "cache" / "demo"
+    boundary_path = data_root / "boundaries" / "watershed.geojson"
+    manifest_path = data_root / "manifest.json"
+    _write_boundary(boundary_path)
+    before, corrected_after = _acquisitions(tmp_path)
+    legacy_after = replace(corrected_after, boa_offset_applied=False)
+
+    build_cache(
+        boundary_path=boundary_path,
+        data_root=data_root,
+        cache_dir=cache_dir,
+        manifest_path=manifest_path,
+        acquisitions=(before, legacy_after),
+        approval_date=date(2026, 7, 19),
+    )
+    preserved_timestamp = 1_700_000_000_000_000_000
+    before_paths = (cache_dir / "before_red.tif", cache_dir / "before_nir.tif")
+    for path in before_paths:
+        os.utime(path, ns=(preserved_timestamp, preserved_timestamp))
+
+    result = build_cache(
+        boundary_path=boundary_path,
+        data_root=data_root,
+        cache_dir=cache_dir,
+        manifest_path=manifest_path,
+        acquisitions=(before, corrected_after),
+        approval_date=date(2026, 7, 19),
+    )
+
+    assert not result.reused
+    assert all(path.stat().st_mtime_ns == preserved_timestamp for path in before_paths)
+    manifest = load_manifest(manifest_path)
+    by_id = {asset.logical_id.value: asset for asset in manifest.assets}
+    assert "already applied=true" in by_id["after_red"].derivation

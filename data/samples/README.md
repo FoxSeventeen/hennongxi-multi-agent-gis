@@ -75,7 +75,9 @@ python scripts/derive_watershed.py
 共享网格，并写出 4 个本地 Float32 GeoTIFF 输入。转换规则如下：
 
 - 2019 年反射率：`DN * 0.0001 + 0.0`。
-- 2024 年反射率：`DN * 0.0001 - 0.1`。
+- 2024 年源资产声明的栅格偏移为 `-0.1`，但 Earth Search 项目同时标记
+  `earthsearch:boa_offset_applied=true`，表示 COG 像元已经应用该 BOA 偏移；因此缓存
+  使用 `COG_DN * 0.0001 + 0.0`，不得再次减去 `0.1`。
 - SCL 使用最近邻方法重采样到 10 m。
 - 流域外像元及 SCL 类别 0、1、3、8、9、10、11 写为 `-9999` nodata。
 - 最终 `data/manifest.json` 记录源标识、转换规则、本地文件大小和 SHA-256。
@@ -100,8 +102,8 @@ python scripts/derive_watershed.py
 - 平台与网格：Sentinel-2A，MGRS 49RDQ，处理基线 05.11。
 - 整景云量：6.090892%。
 - SCL 流域预检：10,556,343 个流域像元中，10,250,509 个有效，有效率 97.10%。
-- 与前期影像的日历日期相差 7 天；平台、瓦片、轨道、分辨率、比例/偏移、掩膜和许可
-  均保持不变。
+- 与前期影像的日历日期相差 7 天；平台、瓦片、轨道、分辨率、源资产比例/偏移声明、
+  掩膜和许可均保持不变；缓存会依据 `earthsearch:boa_offset_applied` 防止重复偏移。
 
 ### 获批替换的精确源文件
 
@@ -121,8 +123,8 @@ python scripts/derive_watershed.py
 | 流域 | `data/boundaries/shennongxi_watershed.geojson` | 9,099 | `1c44b253e6220364109d6a62b17d2a66ef19ef12a6f4dc368ba1a41142eed7c3` | — | — |
 | 前期红光 | `data/cache/demo/before_red.tif` | 42,342,174 | `815552ea48aca8610b62544b85be8b006e4d25252a3c4fe083853824bf66499f` | 100% | 95.74% |
 | 前期近红外 | `data/cache/demo/before_nir.tif` | 41,472,540 | `d15c4b665c3ea33347dfe78c5b3514e38c37859429c8d488cba07193299ce0c1` | 100% | 95.74% |
-| 后期红光 | `data/cache/demo/after_red.tif` | 40,639,174 | `66bc7e4d207b714da252a76902ea39747df9a6539aabaacf73f1fe2ff741ddc2` | 100% | 97.10% |
-| 后期近红外 | `data/cache/demo/after_nir.tif` | 42,175,838 | `275d062c884c8ef8c6fdd2b3f63f295ef94675c6888f6db81de3fd1ea566ffe2` | 100% | 97.10% |
+| 后期红光 | `data/cache/demo/after_red.tif` | 43,096,434 | `c14aa6d4606e083cf04cf489f117a078fe41a711140aae510e69196c7d6f4dc9` | 100% | 97.10% |
+| 后期近红外 | `data/cache/demo/after_nir.tif` | 42,100,556 | `84f645c9295efc1795450e8619ed00473c6c45f022eea5844deb2d13ee6ba42e` | 100% | 97.10% |
 
 四个 GeoTIFF 均为 EPSG:32649、10 m、Float32、nodata `-9999`，且使用完全一致的像元
 网格。再次运行缓存命令时会在无网络环境中返回 `Reused verified offline cache`，表示已复用
@@ -133,6 +135,8 @@ python scripts/derive_watershed.py
 - 2026-07-19：首次 G2 来源组合获批。
 - 2026-07-19：真实像元检查拒绝 2024-08-22 后期影像。
 - 2026-07-19：用户回复 `批准 G2 变更：after 改为 2024-08-12`，替换方案获批。
+- 2026-07-20：用户回复 `批准 G2 反射率修正`，批准按 COG 已应用 BOA 偏移的语义
+  修正缓存；真实私网质量验收结论为 `PASS`。
 
 [hydrobasins-product]: https://www.hydrosheds.org/products/hydrobasins
 [hydrobasins-archive]: https://data.hydrosheds.org/file/hydrobasins/standard/hybas_as_lev12_v1c.zip
