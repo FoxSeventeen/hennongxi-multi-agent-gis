@@ -432,26 +432,29 @@ The critical path is contracts → persistence/events → raster chain → orche
 
 ### Phase 5: Report, LLM planning, and public task entry
 
-#### Task 13: Generate and download the Chinese PDF report
+#### 任务 13：生成并下载中文 PDF 报告
 
-**Description:** Add a ReportLab report builder with a bundled redistributable Chinese font. The report identifies the task/data dates, plan/Agent run, NDVI/change statistics, quality evidence, limitations, and artifact checksums.
+**说明：** 使用 ReportLab 和随镜像分发的可再分发中文字体生成任务绑定报告。报告需
+说明任务与数据日期、计划/Agent 执行、NDVI 变化统计、质量证据、限制和成果校验和。
 
-**Acceptance criteria:**
+**验收标准：**
 
-- [ ] A completed fixture produces a task-bound PDF with readable Chinese text, no missing-glyph boxes, and all required metrics/conclusions.
-- [ ] The download route serves only the requested task's registered report with safe filename/content headers.
-- [ ] Missing/incomplete inputs fail visibly instead of producing a successful-looking report.
+- [ ] 完整夹具生成任务绑定 PDF，中文可读、没有缺字方框，并包含全部必需指标与结论。
+- [ ] 下载路由只提供请求任务已登记的报告，并返回安全文件名和内容响应头。
+- [ ] 缺失或不完整输入显式失败，不得生成看似成功的报告。
 
-**Verification:**
+**验证：**
 
+- [x] 已固定 Noto CJK 官方提交 `f8d157532fbfaeda587e826d4cd5b21a49186f7c` 的
+  简体中文子集 TTF，记录字体/许可证 SHA-256，并验证关键中文字符和非 editable 镜像安装包。
 - [ ] `docker compose run --rm publisher-agent pytest services/publisher_agent/tests -q -k report`
-- [ ] PDF text extraction and rendered-page image checks pass.
+- [ ] PDF 文本提取与页面渲染图像检查通过。
 
-**Dependencies:** T11, T12 and approval of the Publisher download route.
+**依赖：** T11、T12，以及已批准的 Publisher 下载路由。
 
-**Files likely touched:** `services/publisher_agent/app/report.py`, download route, font asset/license, report tests.
+**预计修改文件：** Publisher 报告生成器、下载路由、字体资产/许可证和报告测试。
 
-**Estimated scope:** M.
+**规模：** M。
 
 #### Task 14: Implement the safe LLM planning adapter
 

@@ -111,10 +111,11 @@ Source of truth: `docs/spec.md` at `92e50a6`. Detailed rationale, file scope, an
 
 ## Day 5 — Report, LLM, and public task entry
 
-- [ ] **T13 Generate/download Chinese PDF** (depends: T11-T12; gate: G1)
-  - [ ] Embed licensed Chinese font and include task/data/plan/statistics/quality/limitations/checksums.
-  - [ ] Enforce task-bound safe download and visible failure for incomplete inputs.
-  - [ ] Pass PDF extraction, rendered-page, glyph, headers, and access tests.
+- [ ] **T13 生成并下载中文 PDF**（依赖：T11-T12；门禁：G1）
+  - [x] 固定 Noto Sans SC 官方字体、上游提交、SHA-256 和 SIL OFL 1.1 许可证，并验证关键中文字符与镜像内安装包。
+  - [ ] 在报告中包含任务、数据日期、计划、统计、质量、限制和校验和。
+  - [ ] 强制任务绑定的安全下载；输入不完整时必须显式失败。
+  - [ ] 通过 PDF 文本提取、页面渲染、字形、响应头和访问控制测试。
 - [ ] **T14 Implement safe LLM adapter** (depends: T02, T06; gate: G3 for real smoke)
   - [ ] Validate fake-provider success, malformed, timeout, auth, rate-limit, and disallowed-step cases.
   - [ ] Prove secrets/unsafe fields never reach logs, persistence, responses, or execution.
