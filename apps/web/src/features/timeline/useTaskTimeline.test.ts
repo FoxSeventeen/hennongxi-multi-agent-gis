@@ -275,6 +275,13 @@ describe("timeline SSE and polling recovery", () => {
         });
         return;
       }
+      if (options.afterSequence === 0) {
+        options.onEvent({
+          ...event(1, "FAILED", 80),
+          error: failure,
+        });
+        return;
+      }
       await new Promise<void>((resolve) => {
         options.signal.addEventListener(
           "abort",
@@ -297,9 +304,16 @@ describe("timeline SSE and polling recovery", () => {
       result.current.retry();
     });
     await waitFor(() => {
-      expect(result.current.snapshot?.currentAttempt).toBe(2);
+      expect(result.current.snapshot).toMatchObject({
+        currentAttempt: 2,
+        status: "PENDING",
+      });
     });
     expect(streamTaskEvents).toHaveBeenCalledTimes(2);
+    expect(streamTaskEvents).toHaveBeenLastCalledWith(
+      taskId,
+      expect.objectContaining({ afterSequence: 1 }),
+    );
     unmount();
   });
 

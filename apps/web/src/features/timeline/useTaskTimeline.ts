@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { MasterApiError, type MasterClient } from "../../api/client";
 import type { TaskEvent, TaskSnapshot, TaskStatus } from "../../api/task-contract";
@@ -42,12 +42,19 @@ export function useTaskTimeline(
   const [connection, setConnection] = useState<TimelineConnection>("loading");
   const [problem, setProblem] = useState<string | null>(null);
   const [retryIndex, setRetryIndex] = useState(0);
+  const eventTaskIdRef = useRef<string | null>(null);
+  const eventHistoryRef = useRef<readonly TaskEvent[]>([]);
   const retryDelaysMs = normalizeRetryDelays(options.retryDelaysMs);
   const retryKey = retryDelaysMs.join(",");
 
   useEffect(() => {
+    const taskChanged = eventTaskIdRef.current !== taskId;
+    if (taskChanged) {
+      eventTaskIdRef.current = taskId;
+      eventHistoryRef.current = [];
+      setEvents([]);
+    }
     setSnapshot(null);
-    setEvents([]);
     setConnection("loading");
     setProblem(null);
     if (taskId === null) {
@@ -56,8 +63,10 @@ export function useTaskTimeline(
     const activeTaskId = taskId;
 
     const controller = new AbortController();
-    const eventsBySequence = new Map<number, TaskEvent>();
-    let lastSequence = 0;
+    const eventsBySequence = new Map<number, TaskEvent>(
+      eventHistoryRef.current.map((event) => [event.sequence, event]),
+    );
+    let lastSequence = Math.max(0, ...eventsBySequence.keys());
     let fatalFailure = false;
     let latestSnapshot: TaskSnapshot | null = null;
     let planRefreshPending = false;
@@ -68,15 +77,21 @@ export function useTaskTimeline(
       }
       eventsBySequence.set(event.sequence, event);
       lastSequence = Math.max(lastSequence, event.sequence);
-      setEvents([...eventsBySequence.values()].sort((left, right) => left.sequence - right.sequence));
-      if (latestSnapshot !== null) {
+      const orderedEvents = [...eventsBySequence.values()].sort(
+        (left, right) => left.sequence - right.sequence,
+      );
+      eventHistoryRef.current = orderedEvents;
+      setEvents(orderedEvents);
+      if (latestSnapshot !== null && event.attempt >= latestSnapshot.currentAttempt) {
+        const previousAttempt = latestSnapshot.currentAttempt;
         latestSnapshot = {
           ...latestSnapshot,
           status: event.status,
           progress: event.progress,
           currentAttempt: Math.max(latestSnapshot.currentAttempt, event.attempt),
           updatedAt: event.occurredAt,
-          lastError: event.error ?? latestSnapshot.lastError,
+          lastError:
+            event.error ?? (event.attempt > previousAttempt ? null : latestSnapshot.lastError),
         };
         setSnapshot(latestSnapshot);
         if (
@@ -150,7 +165,12 @@ export function useTaskTimeline(
           return;
         }
         const latestEvent = eventsBySequence.get(lastSequence);
-        if (latestEvent !== undefined && isTerminal(latestEvent.status)) {
+        if (
+          latestEvent !== undefined &&
+          latestSnapshot !== null &&
+          latestEvent.attempt === latestSnapshot.currentAttempt &&
+          isTerminal(latestEvent.status)
+        ) {
           const finalSnapshot = await refreshSnapshot();
           if (!isStopped(controller.signal)) {
             if (finalSnapshot === null) {
