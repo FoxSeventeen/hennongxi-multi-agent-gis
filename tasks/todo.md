@@ -20,7 +20,7 @@ Source of truth: `docs/spec.md` at `92e50a6`. Detailed rationale, file scope, an
     质量阈值不变。
 - [x] G3：已提供不提交到 Git 的大模型运行配置，并完成脱敏真实冒烟。
 - [x] G4：在容器验证前启动 OrbStack/Docker。
-- [ ] G5：批准后端专用、可降级的高德研究区校验边界；详见
+- [x] G5：已批准后端专用、可降级的高德研究区校验边界；详见
   `tasks/approvals/G5-amap-web-service-integration.md`。
 
 ## Day 1 — Contract and runnable foundation

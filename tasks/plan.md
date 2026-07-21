@@ -6,8 +6,8 @@
 - Repository state at planning time: greenfield; only `.gitignore` and `docs/spec.md` are tracked.
 - Scope of this document: the 10-day MVP only. It does not reopen requirements discovery or add scenarios outside ecological change monitoring.
 - Approval status: approved by the user on 2026-07-19, including the proposed Publisher resource routes below.
-- 2026-07-21 变更提案：在不改变 G2 权威数据、五 Agent 拓扑和公开路由集合的前提下，
-  增加可降级的高德 Web 服务研究区校验；实施前需通过中文门禁 G5。
+- 2026-07-21 变更已批准：在不改变 G2 权威数据、五 Agent 拓扑和公开路由集合的前提下，
+  增加可降级的高德 Web 服务研究区校验；中文门禁 G5 已由用户以“开始 T23”批准。
 
 ## Overview
 
@@ -976,7 +976,7 @@ The critical path is contracts → persistence/events → raster chain → orche
 2. **G2 已批准：**权威流域、2019-08-19 与 2024-08-12 影像及反射率修正；高德不得替代这些来源。
 3. **G3 已满足：**大模型配置仅用于后端真实冒烟与演练，不进入 Git 或浏览器。
 4. **G4 已满足：**容器后端在 Compose/浏览器验证前运行。
-5. **G5 待批准：**按 `tasks/approvals/G5-amap-web-service-integration.md` 接入后端专用、可降级的
+5. **G5 已批准：**按 `tasks/approvals/G5-amap-web-service-integration.md` 接入后端专用、可降级的
    高德研究区校验；不新增公开路由、不替换 MapLibre、不缓存高德数据、不扩展第二 GIS 场景。
 
 不得通过静默扩大范围来处理其他开放问题。若要增加第二个 GIS 场景、高德 JS API/底图、
