@@ -69,6 +69,12 @@ export function completedResultSnapshot(options: {
   readonly source?: PlanSource;
 } = {}): TaskSnapshot {
   const source = options.source ?? "REAL_LLM";
+  const failure = {
+    code: "PUBLISHING_FAILED" as const,
+    message: "发布服务暂时失败",
+    retryable: true,
+    details: [{ field: "publish_results", reason: "Publisher 暂时不可用" }],
+  };
   return {
     taskId: resultTaskId,
     query: "分析神农溪流域 2019 至 2024 年植被变化",
@@ -92,18 +98,38 @@ export function completedResultSnapshot(options: {
         responseSha256: source === "REAL_LLM" ? "a".repeat(64) : null,
         errorCode: source === "REAL_LLM" ? null : "DEPENDENCY_UNAVAILABLE",
       },
-      steps: [],
+      steps:
+        options.status === "FAILED"
+          ? [
+              {
+                stepId: "publish_results",
+                kind: "publish_results",
+                agent: "publisher",
+                order: 4,
+                title: "发布地图与监测报告",
+                dependsOn: ["evaluate_quality"],
+              },
+            ]
+          : [],
     },
-    steps: [],
-    lastError:
+    steps:
       options.status === "FAILED"
-        ? {
-            code: "PUBLISHING_FAILED",
-            message: "发布服务暂时失败",
-            retryable: true,
-            details: [],
-          }
-        : null,
+        ? [
+            {
+              stepId: "publish_results",
+              kind: "publish_results",
+              agent: "publisher",
+              attempt: 1,
+              status: "FAILED",
+              progress: 0,
+              startedAt: "2024-08-12T08:30:05Z",
+              completedAt: "2024-08-12T08:30:06Z",
+              elapsedMs: 480,
+              error: failure,
+            },
+          ]
+        : [],
+    lastError: options.status === "FAILED" ? failure : null,
     analysis: {
       taskId: resultTaskId,
       attempt: 1,

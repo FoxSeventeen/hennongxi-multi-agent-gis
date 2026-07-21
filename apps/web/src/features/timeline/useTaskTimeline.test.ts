@@ -245,6 +245,64 @@ describe("timeline SSE and polling recovery", () => {
     unmount();
   });
 
+  it("重新加载终态任务后跟随同一任务的新尝试", async () => {
+    const failure = {
+      code: "PUBLISHING_FAILED" as const,
+      message: "发布服务暂时失败",
+      retryable: true,
+      details: [],
+    };
+    const failed: TaskSnapshot = {
+      ...snapshot("FAILED", 80),
+      lastError: failure,
+    };
+    const retried: TaskSnapshot = {
+      ...snapshot("PENDING", 0),
+      currentAttempt: 2,
+    };
+    const getTask = vi
+      .fn<MasterClient["getTask"]>()
+      .mockResolvedValueOnce(failed)
+      .mockResolvedValueOnce(failed)
+      .mockResolvedValueOnce(retried);
+    let streamCall = 0;
+    const streamTaskEvents = vi.fn<MasterClient["streamTaskEvents"]>(async (_id, options) => {
+      streamCall += 1;
+      if (streamCall === 1) {
+        options.onEvent({
+          ...event(1, "FAILED", 80),
+          error: failure,
+        });
+        return;
+      }
+      await new Promise<void>((resolve) => {
+        options.signal.addEventListener(
+          "abort",
+          () => {
+            resolve();
+          },
+          { once: true },
+        );
+      });
+    });
+    const masterClient = client({ getTask, streamTaskEvents });
+    const { result, unmount } = renderHook(() =>
+      useTaskTimeline(masterClient, taskId, { retryDelaysMs: [0] }),
+    );
+
+    await waitFor(() => {
+      expect(result.current.connection).toBe("complete");
+    });
+    act(() => {
+      result.current.retry();
+    });
+    await waitFor(() => {
+      expect(result.current.snapshot?.currentAttempt).toBe(2);
+    });
+    expect(streamTaskEvents).toHaveBeenCalledTimes(2);
+    unmount();
+  });
+
   it("aborts the active stream when the timeline unmounts", async () => {
     let streamSignal: AbortSignal | null = null;
     const getTask = vi.fn<MasterClient["getTask"]>().mockResolvedValue(snapshot("ANALYZING", 40));

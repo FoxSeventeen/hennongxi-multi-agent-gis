@@ -102,6 +102,10 @@ export function App({ client, publisherBaseUrl = "http://localhost:8004" }: AppP
               <ResultPanel
                 snapshot={timelineState.snapshot}
                 publisherBaseUrl={publisherBaseUrl}
+                client={client}
+                onRetryAccepted={() => {
+                  timelineState.retry();
+                }}
               />
             </>
           )}

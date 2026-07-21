@@ -1,8 +1,20 @@
 import { render, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it, vi } from "vitest";
 
+import { MasterApiError, type AcceptedRetry, type MasterClient } from "../../api/client";
 import { ResultPanel } from "./ResultPanel";
 import { completedResultSnapshot, resultTaskId } from "./test-fixtures";
+
+function client(retryTask: MasterClient["retryTask"] = vi.fn()): MasterClient {
+  return {
+    getReadiness: vi.fn(),
+    createTask: vi.fn(),
+    getTask: vi.fn(),
+    retryTask,
+    streamTaskEvents: vi.fn(),
+  };
+}
 
 describe("results quality report 成果与质量面板", () => {
   it("向答辩查看者呈现完整统计、四项质量指标、真实大模型证据和 PDF", () => {
@@ -10,6 +22,8 @@ describe("results quality report 成果与质量面板", () => {
       <ResultPanel
         snapshot={completedResultSnapshot()}
         publisherBaseUrl="http://localhost:8004"
+        client={client()}
+        onRetryAccepted={vi.fn()}
       />,
     );
 
@@ -53,11 +67,98 @@ describe("results quality report 成果与质量面板", () => {
       <ResultPanel
         snapshot={completedResultSnapshot({ status: "FAILED" })}
         publisherBaseUrl="http://localhost:8004"
+        client={client()}
+        onRetryAccepted={vi.fn()}
       />,
     );
 
     expect(screen.getByRole("status")).toHaveTextContent("本次执行未完成");
     expect(screen.queryByText("质量结论：通过")).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "下载中文 PDF 报告" })).not.toBeInTheDocument();
+  });
+
+  it("显示责任步骤和结构化错误，并只提交一次受保护的失败重试", async () => {
+    let acceptRetry: (retry: AcceptedRetry) => void = () => undefined;
+    const pendingRetry = new Promise<AcceptedRetry>((resolve) => {
+      acceptRetry = resolve;
+    });
+    const retryTask = vi.fn<MasterClient["retryTask"]>().mockReturnValue(pendingRetry);
+    const onRetryAccepted = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <ResultPanel
+        snapshot={completedResultSnapshot({ status: "FAILED" })}
+        publisherBaseUrl="http://localhost:8004"
+        client={client(retryTask)}
+        onRetryAccepted={onRetryAccepted}
+      />,
+    );
+
+    const failure = screen.getByRole("alert");
+    expect(failure).toHaveTextContent("发布 Agent");
+    expect(failure).toHaveTextContent("发布地图与监测报告");
+    expect(failure).toHaveTextContent("发布服务暂时失败");
+    expect(failure).toHaveTextContent("Publisher 暂时不可用");
+
+    const retryButton = screen.getByRole("button", { name: "重试失败任务" });
+    await user.click(retryButton);
+    expect(retryButton).toBeDisabled();
+    expect(retryTask).toHaveBeenCalledOnce();
+    expect(retryTask).toHaveBeenCalledWith(resultTaskId);
+
+    acceptRetry({
+      taskId: resultTaskId,
+      attempt: 2,
+      status: "PENDING",
+      acceptedAt: "2024-08-12T08:31:00Z",
+    });
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "已接受第 2 次执行，正在重新连接",
+    );
+    expect(onRetryAccepted).toHaveBeenCalledOnce();
+  });
+
+  it("不可重试错误不显示操作，重试冲突则保留原失败证据", async () => {
+    const nonRetryable = completedResultSnapshot({ status: "FAILED" });
+    const locked = {
+      ...nonRetryable,
+      lastError:
+        nonRetryable.lastError === null
+          ? null
+          : { ...nonRetryable.lastError, retryable: false },
+      steps: nonRetryable.steps.map((step) => ({
+        ...step,
+        error: step.error === null ? null : { ...step.error, retryable: false },
+      })),
+    };
+    const { rerender } = render(
+      <ResultPanel
+        snapshot={locked}
+        publisherBaseUrl="http://localhost:8004"
+        client={client()}
+        onRetryAccepted={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("此错误不能从界面安全重试。")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "重试失败任务" })).not.toBeInTheDocument();
+
+    const retryTask = vi.fn<MasterClient["retryTask"]>().mockRejectedValue(
+      new MasterApiError({
+        code: "CONFLICT",
+        message: "任务当前状态不能安全重试。",
+        retryable: false,
+      }),
+    );
+    rerender(
+      <ResultPanel
+        snapshot={completedResultSnapshot({ status: "FAILED" })}
+        publisherBaseUrl="http://localhost:8004"
+        client={client(retryTask)}
+        onRetryAccepted={vi.fn()}
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "重试失败任务" }));
+    expect(await screen.findByText("任务当前状态不能安全重试。")).toBeVisible();
+    expect(screen.getByText("发布服务暂时失败")).toBeVisible();
   });
 });

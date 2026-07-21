@@ -1,13 +1,22 @@
+import type { AcceptedRetry, MasterClient } from "../../api/client";
 import type { TaskSnapshot } from "../../api/task-contract";
 import { buildResultPresentation, type ResultPlanningEvidence } from "./result-model";
+import { RetryControl } from "./RetryControl";
 import "./results.css";
 
 interface ResultPanelProps {
   readonly snapshot: TaskSnapshot | null;
   readonly publisherBaseUrl: string;
+  readonly client: MasterClient;
+  readonly onRetryAccepted: (retry: AcceptedRetry) => void;
 }
 
-export function ResultPanel({ snapshot, publisherBaseUrl }: ResultPanelProps) {
+export function ResultPanel({
+  snapshot,
+  publisherBaseUrl,
+  client,
+  onRetryAccepted,
+}: ResultPanelProps) {
   const result =
     snapshot === null ? null : buildResultPresentation(snapshot, publisherBaseUrl);
 
@@ -24,6 +33,8 @@ export function ResultPanel({ snapshot, publisherBaseUrl }: ResultPanelProps) {
         <div className="results-state" role="status">
           正在读取本次任务的成果证据…
         </div>
+      ) : result.status === "incomplete" && snapshot?.status === "FAILED" ? (
+        <RetryControl snapshot={snapshot} client={client} onAccepted={onRetryAccepted} />
       ) : result.status === "incomplete" ? (
         <div className="results-state" role="status">
           {result.message}

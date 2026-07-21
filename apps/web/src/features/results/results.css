@@ -23,6 +23,87 @@
   border-left-color: var(--danger);
 }
 
+.retry-control {
+  margin-top: 14px;
+}
+
+.failure-evidence {
+  padding: 12px;
+  color: #6f302b;
+  background: #f8e5e1;
+  border-left: 3px solid var(--danger);
+}
+
+.failure-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.failure-heading span,
+.failure-heading strong {
+  font-size: 0.64rem;
+}
+
+.failure-evidence h3 {
+  margin: 5px 0 0;
+  font-size: 0.78rem;
+}
+
+.failure-evidence p {
+  margin: 7px 0 0;
+  font-size: 0.72rem;
+  line-height: 1.55;
+}
+
+.failure-evidence ul {
+  margin: 7px 0 0;
+  padding-left: 18px;
+  font-size: 0.67rem;
+  line-height: 1.55;
+}
+
+.retry-status,
+.retry-error,
+.retry-locked {
+  margin: 10px 0 0;
+  color: var(--ink-muted);
+  font-size: 0.68rem;
+  line-height: 1.5;
+}
+
+.retry-error {
+  padding: 9px 10px;
+  color: #6f302b;
+  background: #fff1ed;
+  border-left: 3px solid var(--danger);
+}
+
+.retry-locked {
+  color: #6f302b;
+}
+
+.retry-button {
+  width: 100%;
+  min-height: 42px;
+  margin-top: 11px;
+  padding: 9px 12px;
+  color: #f8f7f1;
+  background: var(--forest);
+  border: 1px solid var(--forest);
+  font-size: 0.72rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.retry-button:disabled {
+  color: #d6ded9;
+  background: #60736c;
+  border-color: #60736c;
+  cursor: wait;
+}
+
 .observation-period {
   margin-top: 14px;
   padding: 10px 12px;
