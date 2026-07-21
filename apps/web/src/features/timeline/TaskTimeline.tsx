@@ -70,7 +70,7 @@ export function TaskTimelineView({ state }: { readonly state: TaskTimelineState 
               <span>第 {snapshot.currentAttempt} 次执行</span>
             </div>
             <div>
-              <span>{snapshot.plan?.source === "REAL_LLM" ? "真实大模型计划" : "内置恢复计划"}</span>
+              <span>{getPlanSourceLabel(snapshot.plan?.source)}</span>
               <strong>{snapshot.progress}%</strong>
             </div>
           </div>
@@ -95,6 +95,16 @@ export function TaskTimelineView({ state }: { readonly state: TaskTimelineState 
       )}
     </section>
   );
+}
+
+function getPlanSourceLabel(source: "REAL_LLM" | "BUILTIN_RECOVERY" | undefined): string {
+  if (source === "REAL_LLM") {
+    return "真实大模型计划";
+  }
+  if (source === "BUILTIN_RECOVERY") {
+    return "内置恢复计划";
+  }
+  return "计划尚未生成";
 }
 
 function getConnectionLabel(

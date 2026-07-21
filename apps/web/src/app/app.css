@@ -317,6 +317,24 @@ input:focus-visible,
   min-width: 0;
 }
 
+.task-location-error {
+  margin-bottom: 14px;
+  color: #6f302b;
+  background: #f8e5e1;
+  border-left: 3px solid var(--danger);
+}
+
+.task-location-error h2 {
+  margin: 10px 0 6px;
+  font-size: 1rem;
+}
+
+.task-location-error > p:not(.section-kicker) {
+  margin: 0;
+  font-size: 0.76rem;
+  line-height: 1.6;
+}
+
 .panel-card {
   padding: 20px;
 }

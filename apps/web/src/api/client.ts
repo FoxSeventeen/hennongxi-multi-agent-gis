@@ -105,16 +105,6 @@ const serviceNames = new Set<string>([
   "postgis",
   "redis",
 ]);
-const taskStatuses = new Set<string>([
-  "PENDING",
-  "PLANNING",
-  "DATA_PREPARING",
-  "ANALYZING",
-  "QUALITY_CHECKING",
-  "PUBLISHING",
-  "COMPLETED",
-  "FAILED",
-]);
 const errorCodes = new Set<string>([
   "VALIDATION_ERROR",
   "INVALID_PLAN",
@@ -395,9 +385,10 @@ function isTaskAcceptedResponse(value: unknown): value is TaskAcceptedResponseWi
     isRecord(value) &&
     hasSchemaVersion(value) &&
     typeof value["task_id"] === "string" &&
-    typeof value["status"] === "string" &&
-    taskStatuses.has(value["status"]) &&
-    typeof value["created_at"] === "string"
+    isTaskId(value["task_id"]) &&
+    value["status"] === "PENDING" &&
+    typeof value["created_at"] === "string" &&
+    Number.isFinite(Date.parse(value["created_at"]))
   );
 }
 

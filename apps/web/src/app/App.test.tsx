@@ -1,9 +1,13 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { MasterClient, ReadinessSnapshot } from "../api/client";
+import type { AcceptedTask, MasterClient, ReadinessSnapshot } from "../api/client";
+import type { TaskEvent, TaskSnapshot } from "../api/task-contract";
 import { App } from "./App";
+
+const taskId = "4f09fc09-6bd2-49fb-9636-7f4fb93baa44";
+const correlationId = "f399c36a-6b76-4db5-a831-ebf6a170edf1";
 
 const readySnapshot: ReadinessSnapshot = {
   ready: true,
@@ -31,14 +35,19 @@ const readySnapshot: ReadinessSnapshot = {
   },
 };
 
-function createClient(getReadiness = vi.fn().mockResolvedValue(readySnapshot)): MasterClient {
+function createClient(overrides: Partial<MasterClient> = {}): MasterClient {
   return {
-    getReadiness,
+    getReadiness: vi.fn().mockResolvedValue(readySnapshot),
     createTask: vi.fn(),
     getTask: vi.fn(),
     streamTaskEvents: vi.fn(),
+    ...overrides,
   };
 }
+
+afterEach(() => {
+  window.history.replaceState(null, "", "/");
+});
 
 describe("readiness application shell", () => {
   it("renders a map-first Chinese shell and resolved Agent readiness", async () => {
@@ -64,7 +73,9 @@ describe("readiness application shell", () => {
       messages: [],
       health: { ...readySnapshot.health, state: "DEGRADED" },
     };
-    render(<App client={createClient(vi.fn().mockResolvedValue(blockedSnapshot))} />);
+    render(
+      <App client={createClient({ getReadiness: vi.fn().mockResolvedValue(blockedSnapshot) })} />,
+    );
 
     expect(await screen.findByText("需要完成配置")).toBeVisible();
     expect(screen.getByText("尚未配置大模型访问凭据")).toBeVisible();
@@ -79,12 +90,117 @@ describe("readiness application shell", () => {
       .mockRejectedValueOnce(new Error("network unavailable"))
       .mockResolvedValueOnce(readySnapshot);
     const user = userEvent.setup();
-    render(<App client={createClient(getReadiness)} />);
+    render(<App client={createClient({ getReadiness })} />);
 
     expect(await screen.findByRole("alert")).toHaveTextContent("暂时无法读取系统状态");
     await user.click(screen.getByRole("button", { name: "重新检查系统状态" }));
 
     expect(await screen.findByText("系统已就绪")).toBeVisible();
     expect(getReadiness).toHaveBeenCalledTimes(2);
+  });
+
+  it("reconstructs the Agent timeline from a task URL after refresh", async () => {
+    window.history.replaceState(null, "", `/?task_id=${taskId}`);
+    const completedSnapshot: TaskSnapshot = {
+      taskId,
+      query: "分析神农溪植被变化",
+      status: "COMPLETED",
+      progress: 100,
+      currentAttempt: 1,
+      correlationId,
+      createdAt: "2024-08-12T08:30:00Z",
+      updatedAt: "2024-08-12T08:30:05Z",
+      plan: null,
+      steps: [],
+      lastError: null,
+    };
+    const terminalEvent: TaskEvent = {
+      sequence: 8,
+      taskId,
+      stepId: "publish_results",
+      attempt: 1,
+      correlationId,
+      agent: "publisher",
+      status: "COMPLETED",
+      progress: 100,
+      message: "任务执行完成",
+      elapsedMs: 5_000,
+      occurredAt: "2024-08-12T08:30:05Z",
+      error: null,
+    };
+    const getTask = vi.fn<MasterClient["getTask"]>().mockResolvedValue(completedSnapshot);
+    const streamTaskEvents = vi.fn<MasterClient["streamTaskEvents"]>((_id, options) => {
+      options.onEvent(terminalEvent);
+      return Promise.resolve();
+    });
+
+    render(<App client={createClient({ getTask, streamTaskEvents })} />);
+
+    expect(await screen.findByRole("heading", { level: 2, name: "Agent 执行时间线" })).toBeVisible();
+    expect(screen.getByText(taskId)).toBeVisible();
+    expect(await screen.findByText("任务已完成")).toBeVisible();
+    expect(getTask).toHaveBeenCalledWith(taskId);
+    expect(streamTaskEvents).toHaveBeenCalledWith(
+      taskId,
+      expect.objectContaining({ afterSequence: 0 }),
+    );
+  });
+
+  it("binds an accepted task to the URL and opens its timeline", async () => {
+    const acceptedTask: AcceptedTask = {
+      taskId,
+      status: "PENDING",
+      createdAt: "2024-08-12T08:30:00Z",
+    };
+    const pendingSnapshot: TaskSnapshot = {
+      taskId,
+      query: "分析神农溪植被变化",
+      status: "PENDING",
+      progress: 0,
+      currentAttempt: 1,
+      correlationId,
+      createdAt: acceptedTask.createdAt,
+      updatedAt: acceptedTask.createdAt,
+      plan: null,
+      steps: [],
+      lastError: null,
+    };
+    const createTask = vi.fn<MasterClient["createTask"]>().mockResolvedValue(acceptedTask);
+    const getTask = vi.fn<MasterClient["getTask"]>().mockResolvedValue(pendingSnapshot);
+    const streamTaskEvents = vi.fn<MasterClient["streamTaskEvents"]>(async (_id, options) => {
+      await new Promise<void>((resolve) => {
+        options.signal.addEventListener(
+          "abort",
+          () => {
+            resolve();
+          },
+          { once: true },
+        );
+      });
+    });
+    const user = userEvent.setup();
+    render(<App client={createClient({ createTask, getTask, streamTaskEvents })} />);
+
+    await screen.findByText("系统已就绪");
+    await user.type(screen.getByRole("textbox", { name: "生态监测任务描述" }), "分析神农溪植被变化");
+    await user.click(screen.getByRole("button", { name: "创建监测任务" }));
+
+    expect(await screen.findByRole("heading", { level: 2, name: "Agent 执行时间线" })).toBeVisible();
+    expect(new URL(window.location.href).searchParams.get("task_id")).toBe(taskId);
+    expect(getTask).toHaveBeenCalledWith(taskId);
+  });
+
+  it("rejects an invalid task URL before it reaches the Master client", async () => {
+    window.history.replaceState(null, "", "/?task_id=not-a-task");
+    const getTask = vi.fn<MasterClient["getTask"]>();
+    const user = userEvent.setup();
+    render(<App client={createClient({ getTask })} />);
+
+    expect(screen.getByRole("alert")).toHaveTextContent("任务编号格式无效");
+    expect(getTask).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "返回新建任务" }));
+
+    expect(new URL(window.location.href).searchParams.has("task_id")).toBe(false);
+    expect(screen.queryByText("任务编号格式无效")).not.toBeInTheDocument();
   });
 });

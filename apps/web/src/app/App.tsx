@@ -4,7 +4,14 @@ import type { AcceptedTask, MasterClient, ReadinessSnapshot } from "../api/clien
 import { MapWorkspace } from "../components/MapWorkspace";
 import { ReadinessPanel } from "../components/ReadinessPanel";
 import { TaskComposer } from "../components/TaskComposer";
+import { TaskTimeline } from "../features/timeline/TaskTimeline";
 import "./app.css";
+import {
+  clearTaskLocation,
+  pushTaskLocation,
+  readTaskLocation,
+  type TaskLocationState,
+} from "./task-location";
 
 interface AppProps {
   readonly client: MasterClient;
@@ -18,7 +25,9 @@ type ReadinessState =
 export function App({ client }: AppProps) {
   const [refreshIndex, setRefreshIndex] = useState(0);
   const [readinessState, setReadinessState] = useState<ReadinessState>({ phase: "loading" });
-  const [activeTask, setActiveTask] = useState<AcceptedTask | null>(null);
+  const [taskLocation, setTaskLocation] = useState<TaskLocationState>(() =>
+    readTaskLocation(window.location.search),
+  );
 
   useEffect(() => {
     let active = true;
@@ -41,6 +50,16 @@ export function App({ client }: AppProps) {
     };
   }, [client, refreshIndex]);
 
+  useEffect(() => {
+    function handlePopState(): void {
+      setTaskLocation(readTaskLocation(window.location.search));
+    }
+    window.addEventListener("popstate", handlePopState);
+    return () => {
+      window.removeEventListener("popstate", handlePopState);
+    };
+  }, []);
+
   const environmentLabel =
     readinessState.phase === "ready" && readinessState.snapshot.ready ? "环境可用" : "检查环境";
   const canSubmit = readinessState.phase === "ready" && readinessState.snapshot.ready;
@@ -60,13 +79,25 @@ export function App({ client }: AppProps) {
       </header>
 
       <main className="workspace-layout">
-        <MapWorkspace activeTask={activeTask} />
+        <MapWorkspace activeTaskId={taskLocation.taskId} />
         <aside className="control-rail" aria-label="任务与状态控制区">
+          {taskLocation.invalid ? (
+            <TaskLocationError
+              onClear={() => {
+                clearTaskLocation();
+                setTaskLocation({ taskId: null, invalid: false });
+              }}
+            />
+          ) : taskLocation.taskId === null ? null : (
+            <TaskTimeline client={client} taskId={taskLocation.taskId} />
+          )}
           <TaskComposer
             client={client}
             canSubmit={canSubmit}
             disabledReason={disabledReason}
-            onAccepted={setActiveTask}
+            onAccepted={(task) => {
+              selectAcceptedTask(task, setTaskLocation);
+            }}
           />
           <ReadinessPanel
             state={readinessState}
@@ -91,4 +122,25 @@ function getSubmissionDisabledReason(state: ReadinessState): string | undefined 
     return "系统就绪后才可创建任务";
   }
   return undefined;
+}
+
+function selectAcceptedTask(
+  task: AcceptedTask,
+  setTaskLocation: (state: TaskLocationState) => void,
+): void {
+  pushTaskLocation(task.taskId);
+  setTaskLocation({ taskId: task.taskId, invalid: false });
+}
+
+function TaskLocationError({ onClear }: { readonly onClear: () => void }) {
+  return (
+    <section className="panel-card task-location-error" role="alert">
+      <p className="section-kicker">任务地址</p>
+      <h2>任务编号格式无效</h2>
+      <p>当前地址无法对应到受支持的任务，请返回新建任务。</p>
+      <button className="secondary-button" type="button" onClick={onClear}>
+        返回新建任务
+      </button>
+    </section>
+  );
 }
