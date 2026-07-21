@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any
 
@@ -11,6 +12,7 @@ from hennongxi_master.amap import (
     AMAP_PLACE_PATH,
     CANONICAL_STUDY_AREA_ADCODE,
     CANONICAL_STUDY_AREA_NAME,
+    MAX_AMAP_RESPONSE_BYTES,
     AmapConfig,
     AmapConfigurationError,
     AmapStudyAreaVerifier,
@@ -46,6 +48,16 @@ def amap_response(pois: list[dict[str, object]]) -> bytes:
     ).encode()
 
 
+def amap_error_response(infocode: str) -> bytes:
+    return json.dumps(
+        {
+            "status": "0",
+            "info": "private-amap-provider-error-detail",
+            "infocode": infocode,
+        }
+    ).encode()
+
+
 def canonical_poi(**overrides: object) -> dict[str, object]:
     poi: dict[str, object] = {
         "id": "private-amap-poi-id",
@@ -57,6 +69,12 @@ def canonical_poi(**overrides: object) -> dict[str, object]:
     }
     poi.update(overrides)
     return poi
+
+
+class FailIfReadStream(httpx.AsyncByteStream):
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        raise AssertionError("non-200 provider body must not be read")
+        yield b"unreachable-private-provider-body"
 
 
 def test_amap_config_loads_only_key_and_bounded_timeout_without_exposing_secret() -> None:
@@ -251,3 +269,153 @@ async def test_amap_verifier_counts_only_exact_canonical_scenic_matches(
     assert result.code is expected_code
     assert result.match_count == expected_match_count
     assert result.retryable is False
+
+
+@pytest.mark.parametrize(
+    ("status_code", "expected_code", "retryable"),
+    [
+        (400, AmapVerificationCode.REQUEST_REJECTED, False),
+        (401, AmapVerificationCode.AUTHENTICATION_FAILED, False),
+        (403, AmapVerificationCode.AUTHENTICATION_FAILED, False),
+        (429, AmapVerificationCode.RATE_LIMITED, True),
+        (500, AmapVerificationCode.PROVIDER_UNAVAILABLE, True),
+        (503, AmapVerificationCode.PROVIDER_UNAVAILABLE, True),
+    ],
+)
+@pytest.mark.asyncio
+async def test_amap_verifier_maps_http_status_without_retaining_provider_body(
+    status_code: int,
+    expected_code: AmapVerificationCode,
+    retryable: bool,
+) -> None:
+    private_detail = "private-http-response-body"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(status_code, text=private_detail)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await AmapStudyAreaVerifier(amap_config(), client).verify()
+
+    assert result.code is expected_code
+    assert result.retryable is retryable
+    assert result.match_count == 0
+    assert private_detail not in result.model_dump_json()
+
+
+@pytest.mark.parametrize(
+    ("infocode", "expected_code", "retryable"),
+    [
+        ("10001", AmapVerificationCode.AUTHENTICATION_FAILED, False),
+        ("10002", AmapVerificationCode.AUTHENTICATION_FAILED, False),
+        ("10009", AmapVerificationCode.AUTHENTICATION_FAILED, False),
+        ("10013", AmapVerificationCode.AUTHENTICATION_FAILED, False),
+        ("10026", AmapVerificationCode.AUTHENTICATION_FAILED, False),
+        ("10041", AmapVerificationCode.AUTHENTICATION_FAILED, False),
+        ("10003", AmapVerificationCode.QUOTA_EXCEEDED, True),
+        ("10044", AmapVerificationCode.QUOTA_EXCEEDED, True),
+        ("10045", AmapVerificationCode.QUOTA_EXCEEDED, True),
+        ("40000", AmapVerificationCode.QUOTA_EXCEEDED, True),
+        ("40002", AmapVerificationCode.QUOTA_EXCEEDED, True),
+        ("10004", AmapVerificationCode.RATE_LIMITED, True),
+        ("10010", AmapVerificationCode.RATE_LIMITED, True),
+        ("10014", AmapVerificationCode.RATE_LIMITED, True),
+        ("10021", AmapVerificationCode.RATE_LIMITED, True),
+        ("10029", AmapVerificationCode.RATE_LIMITED, True),
+        ("10016", AmapVerificationCode.PROVIDER_UNAVAILABLE, True),
+        ("10017", AmapVerificationCode.PROVIDER_UNAVAILABLE, True),
+        ("20003", AmapVerificationCode.PROVIDER_UNAVAILABLE, True),
+        ("30001", AmapVerificationCode.PROVIDER_UNAVAILABLE, True),
+        ("20000", AmapVerificationCode.REQUEST_REJECTED, False),
+        ("20001", AmapVerificationCode.REQUEST_REJECTED, False),
+        ("20002", AmapVerificationCode.REQUEST_REJECTED, False),
+        ("20012", AmapVerificationCode.REQUEST_REJECTED, False),
+        ("99999", AmapVerificationCode.RESPONSE_INVALID, True),
+    ],
+)
+@pytest.mark.asyncio
+async def test_amap_verifier_maps_provider_infocode_to_sanitized_outcome(
+    infocode: str,
+    expected_code: AmapVerificationCode,
+    retryable: bool,
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=amap_error_response(infocode))
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await AmapStudyAreaVerifier(amap_config(), client).verify()
+
+    assert result.code is expected_code
+    assert result.retryable is retryable
+    assert result.match_count == 0
+    assert "private-amap-provider-error-detail" not in result.model_dump_json()
+    assert infocode not in result.model_dump_json()
+
+
+@pytest.mark.parametrize("exception_type", [httpx.ReadTimeout, httpx.ConnectError])
+@pytest.mark.asyncio
+async def test_amap_verifier_sanitizes_transport_failures(
+    exception_type: type[httpx.RequestError],
+) -> None:
+    private_detail = "private-transport-error-detail"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise exception_type(private_detail, request=request)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await AmapStudyAreaVerifier(amap_config(), client).verify()
+
+    assert result.code is AmapVerificationCode.PROVIDER_UNAVAILABLE
+    assert result.retryable is True
+    assert private_detail not in str(result)
+    assert private_detail not in result.model_dump_json()
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        b"not-json-private-response",
+        json.dumps({"status": "1", "info": "OK", "infocode": "10000"}).encode(),
+        b"x" * (MAX_AMAP_RESPONSE_BYTES + 1),
+    ],
+)
+@pytest.mark.asyncio
+async def test_amap_verifier_rejects_malformed_or_oversized_response_without_retaining_it(
+    content: bytes,
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=content)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await AmapStudyAreaVerifier(amap_config(), client).verify()
+
+    assert result.code is AmapVerificationCode.RESPONSE_INVALID
+    assert result.retryable is True
+    assert result.match_count == 0
+    assert "not-json-private-response" not in result.model_dump_json()
+
+
+@pytest.mark.asyncio
+async def test_amap_verifier_does_not_follow_redirects() -> None:
+    requested_hosts: list[str | None] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested_hosts.append(request.url.host)
+        return httpx.Response(302, headers={"location": "http://127.0.0.1/private"})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await AmapStudyAreaVerifier(amap_config(), client).verify()
+
+    assert requested_hosts == ["restapi.amap.com"]
+    assert result.code is AmapVerificationCode.REQUEST_REJECTED
+    assert result.retryable is False
+
+
+@pytest.mark.asyncio
+async def test_amap_verifier_never_reads_non_200_response_body() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(400, stream=FailIfReadStream())
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await AmapStudyAreaVerifier(amap_config(), client).verify()
+
+    assert result.code is AmapVerificationCode.REQUEST_REJECTED

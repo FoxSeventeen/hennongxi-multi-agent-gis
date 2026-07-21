@@ -107,6 +107,29 @@ _RETRYABLE_CODES: Final = frozenset(
     }
 )
 
+_AUTHENTICATION_INFOCODES: Final = frozenset(
+    {
+        "10001",
+        "10002",
+        "10005",
+        "10006",
+        "10007",
+        "10008",
+        "10009",
+        "10011",
+        "10012",
+        "10013",
+        "10026",
+        "10041",
+    }
+)
+_QUOTA_INFOCODES: Final = frozenset({"10003", "10044", "10045", "40000", "40002", "40003"})
+_RATE_LIMIT_INFOCODES: Final = frozenset(
+    {"10004", "10010", "10014", "10015", "10019", "10020", "10021", "10029"}
+)
+_UNAVAILABLE_INFOCODES: Final = frozenset({"10016", "10017", "20003"})
+_REJECTED_INFOCODES: Final = frozenset({"20000", "20001", "20002", "20011", "20012"})
+
 
 class AmapVerification(BaseModel):
     """Minimal evidence that cannot retain AMap POI, coordinates, or response bodies."""
@@ -147,12 +170,15 @@ class _AmapPoi(BaseModel):
     typecode: str = Field(min_length=1, max_length=200)
 
 
-class _AmapResponse(BaseModel):
+class _AmapEnvelope(BaseModel):
     model_config = ConfigDict(extra="ignore", str_strip_whitespace=True)
 
     status: str
     info: str
     infocode: str
+
+
+class _AmapResponse(_AmapEnvelope):
     pois: tuple[_AmapPoi, ...] = Field(max_length=10)
 
 
@@ -191,11 +217,17 @@ class AmapStudyAreaVerifier:
             ) as response:
                 if response.status_code != 200:
                     return self._result(
-                        code=AmapVerificationCode.RESPONSE_INVALID,
+                        code=_map_http_status(response.status_code),
                         checked_at=checked_at,
                         timer_started=timer_started,
                     )
                 response_body = await _read_bounded_response(response)
+        except (httpx.TimeoutException, httpx.RequestError):
+            return self._result(
+                code=AmapVerificationCode.PROVIDER_UNAVAILABLE,
+                checked_at=checked_at,
+                timer_started=timer_started,
+            )
         except (httpx.HTTPError, _AmapResponseTooLarge):
             return self._result(
                 code=AmapVerificationCode.RESPONSE_INVALID,
@@ -204,7 +236,7 @@ class AmapStudyAreaVerifier:
             )
 
         try:
-            provider_response = _AmapResponse.model_validate_json(response_body)
+            envelope = _AmapEnvelope.model_validate_json(response_body)
         except ValidationError:
             return self._result(
                 code=AmapVerificationCode.RESPONSE_INVALID,
@@ -212,11 +244,16 @@ class AmapStudyAreaVerifier:
                 timer_started=timer_started,
             )
 
-        if (
-            provider_response.status != "1"
-            or provider_response.info != "OK"
-            or provider_response.infocode != "10000"
-        ):
+        if envelope.status != "1" or envelope.info != "OK" or envelope.infocode != "10000":
+            return self._result(
+                code=_map_provider_failure(envelope),
+                checked_at=checked_at,
+                timer_started=timer_started,
+            )
+
+        try:
+            provider_response = _AmapResponse.model_validate_json(response_body)
+        except ValidationError:
             return self._result(
                 code=AmapVerificationCode.RESPONSE_INVALID,
                 checked_at=checked_at,
@@ -262,6 +299,32 @@ def _is_canonical_match(poi: _AmapPoi) -> bool:
             type_code.startswith(AMAP_SCENIC_TYPE_PREFIX) for type_code in poi.typecode.split(";")
         )
     )
+
+
+def _map_http_status(status_code: int) -> AmapVerificationCode:
+    if status_code in {401, 403}:
+        return AmapVerificationCode.AUTHENTICATION_FAILED
+    if status_code == 429:
+        return AmapVerificationCode.RATE_LIMITED
+    if 500 <= status_code <= 599:
+        return AmapVerificationCode.PROVIDER_UNAVAILABLE
+    return AmapVerificationCode.REQUEST_REJECTED
+
+
+def _map_provider_failure(envelope: _AmapEnvelope) -> AmapVerificationCode:
+    if envelope.status == "1" or envelope.info == "OK" or envelope.infocode == "10000":
+        return AmapVerificationCode.RESPONSE_INVALID
+    if envelope.infocode in _AUTHENTICATION_INFOCODES:
+        return AmapVerificationCode.AUTHENTICATION_FAILED
+    if envelope.infocode in _QUOTA_INFOCODES:
+        return AmapVerificationCode.QUOTA_EXCEEDED
+    if envelope.infocode in _RATE_LIMIT_INFOCODES:
+        return AmapVerificationCode.RATE_LIMITED
+    if envelope.infocode in _UNAVAILABLE_INFOCODES or envelope.infocode.startswith("3"):
+        return AmapVerificationCode.PROVIDER_UNAVAILABLE
+    if envelope.infocode in _REJECTED_INFOCODES:
+        return AmapVerificationCode.REQUEST_REJECTED
+    return AmapVerificationCode.RESPONSE_INVALID
 
 
 async def _read_bounded_response(response: httpx.Response) -> bytes:
