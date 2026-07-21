@@ -10,7 +10,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from hennongxi_contracts import AgentName
 from hennongxi_observability import create_observed_agent_app
+from redis.asyncio import Redis
 
+from hennongxi_master.events import EventStore
 from hennongxi_master.health import install_master_health_routes
 from hennongxi_master.repository import TaskRepository
 from hennongxi_master.runtime import MasterWorkerRuntime, create_worker_runtime
@@ -26,6 +28,9 @@ DEFAULT_DATABASE_URL = (
 @asynccontextmanager
 async def _repository_lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.task_repository = None
+    app.state.event_store = None
+    event_redis: Redis = app.state.event_redis_factory()
+    app.state.event_redis = event_redis
     runtime: MasterWorkerRuntime | None = None
     worker_task: asyncio.Task[None] | None = None
     stop_worker: asyncio.Event | None = None
@@ -34,7 +39,9 @@ async def _repository_lifespan(app: FastAPI) -> AsyncIterator[None]:
         if config.enabled:
             repository = app.state.task_repository_factory()
             app.state.task_repository = repository
-            runtime = app.state.worker_runtime_factory(repository, config)
+            event_store = app.state.event_store_factory(repository, event_redis)
+            app.state.event_store = event_store
+            runtime = app.state.worker_runtime_factory(repository, config, event_store)
             stop_worker = asyncio.Event()
             worker_task = asyncio.create_task(
                 runtime.worker.serve(stop_worker),
@@ -54,6 +61,9 @@ async def _repository_lifespan(app: FastAPI) -> AsyncIterator[None]:
             if isinstance(repository, TaskRepository):
                 await repository.dispose()
             app.state.task_repository = None
+            app.state.event_store = None
+            await event_redis.aclose()
+            app.state.event_redis = None
 
 
 def create_master_app(environment: Mapping[str, str] | None = None) -> FastAPI:
@@ -66,11 +76,20 @@ def create_master_app(environment: Mapping[str, str] | None = None) -> FastAPI:
     master.state.task_repository_factory = lambda: TaskRepository.from_url(
         values.get("DATABASE_URL", DEFAULT_DATABASE_URL)
     )
+    master.state.event_redis_factory = lambda: Redis.from_url(
+        values.get("REDIS_URL", "redis://redis:6379/0"),
+        decode_responses=True,
+        socket_connect_timeout=2.0,
+    )
+    master.state.event_store_factory = lambda repository, redis: EventStore(repository, redis)
     master.state.worker_config = WorkerConfig.from_environment(values)
-    master.state.worker_runtime_factory = lambda repository, config: create_worker_runtime(
-        repository,
-        config,
-        values,
+    master.state.worker_runtime_factory = lambda repository, config, event_store: (
+        create_worker_runtime(
+            repository,
+            config,
+            values,
+            event_store,
+        )
     )
     install_master_health_routes(master)
     install_master_task_routes(master)

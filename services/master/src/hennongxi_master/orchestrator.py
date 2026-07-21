@@ -76,6 +76,10 @@ class OrchestrationRepository(Protocol):
     async def record_progress(self, value: ProgressCreate) -> TaskEvent: ...
 
 
+class EventPublisher(Protocol):
+    async def publish(self, event: TaskEvent) -> bool: ...
+
+
 class AgentClient(Protocol):
     async def prepare_data(self, command: DataPrepareCommand) -> DataPrepareResult: ...
 
@@ -117,12 +121,14 @@ class TaskOrchestrator:
         repository: OrchestrationRepository,
         agents: AgentClient,
         planner: TaskPlanner,
+        event_publisher: EventPublisher | None = None,
         *,
         now: Callable[[], datetime] | None = None,
     ) -> None:
         self._repository = repository
         self._agents = agents
         self._planner = planner
+        self._event_publisher = event_publisher
         self._now = now or _utc_now
 
     async def run(self, task_id: UUID, *, attempt: int) -> TaskResponse:
@@ -487,7 +493,7 @@ class TaskOrchestrator:
         step_completed_at: datetime | None = None,
         artifact_ids: tuple[UUID, ...] = (),
     ) -> None:
-        await self._repository.transition_task(
+        await self._persist_transition(
             TransitionCreate(
                 task_id=task.task_id,
                 attempt=attempt,
@@ -523,7 +529,7 @@ class TaskOrchestrator:
         step_completed_at: datetime | None = None,
         artifact_ids: tuple[UUID, ...] = (),
     ) -> None:
-        await self._repository.record_progress(
+        event = await self._repository.record_progress(
             ProgressCreate(
                 task_id=task.task_id,
                 attempt=attempt,
@@ -541,6 +547,7 @@ class TaskOrchestrator:
                 artifact_ids=artifact_ids,
             )
         )
+        await self._publish_event(event)
 
     async def _fail_agent(
         self,
@@ -551,7 +558,7 @@ class TaskOrchestrator:
         progress: int,
         error: AgentCallError,
     ) -> TaskResponse:
-        await self._repository.transition_task(
+        await self._persist_transition(
             TransitionCreate(
                 task_id=task.task_id,
                 attempt=attempt,
@@ -581,7 +588,7 @@ class TaskOrchestrator:
         agent: AgentName,
         error: StructuredError,
     ) -> TaskResponse:
-        await self._repository.transition_task(
+        await self._persist_transition(
             TransitionCreate(
                 task_id=task.task_id,
                 attempt=attempt,
@@ -596,6 +603,25 @@ class TaskOrchestrator:
             )
         )
         return await self._failed_task(task, attempt, current_status, error)
+
+    async def _persist_transition(self, value: TransitionCreate) -> None:
+        event = await self._repository.transition_task(value)
+        await self._publish_event(event)
+
+    async def _publish_event(self, event: TaskEvent) -> None:
+        if self._event_publisher is None:
+            return
+        try:
+            await self._event_publisher.publish(event)
+        except Exception as error:
+            # Redis is an acceleration layer; durable orchestration must continue.
+            _LOGGER.warning(
+                "task_event_publish_failed",
+                task_id=str(event.task_id),
+                sequence=event.sequence,
+                correlation_id=str(event.correlation_id),
+                error_type=type(error).__name__,
+            )
 
     async def _failed_task(
         self,

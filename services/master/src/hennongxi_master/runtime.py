@@ -19,7 +19,7 @@ from hennongxi_master.llm import (
     LlmConfigurationError,
     LlmPlanningAdapter,
 )
-from hennongxi_master.orchestrator import TaskOrchestrator
+from hennongxi_master.orchestrator import EventPublisher, TaskOrchestrator
 from hennongxi_master.repository import TaskRepository
 from hennongxi_master.worker import OrchestrationWorker, RecoveryTaskPlanner, WorkerConfig
 
@@ -39,6 +39,7 @@ def create_worker_runtime(
     repository: TaskRepository,
     config: WorkerConfig,
     environment: Mapping[str, str] | None = None,
+    event_publisher: EventPublisher | None = None,
 ) -> MasterWorkerRuntime:
     """Build one worker with shared, bounded HTTP connection pools."""
 
@@ -61,6 +62,7 @@ def create_worker_runtime(
         repository,
         AgentHttpClient(agent_config, agent_http_client),
         planner,
+        event_publisher,
     )
     return MasterWorkerRuntime(
         worker=OrchestrationWorker(repository, orchestrator, config),

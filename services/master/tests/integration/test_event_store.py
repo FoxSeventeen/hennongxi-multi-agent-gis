@@ -197,6 +197,31 @@ async def test_replay_falls_back_to_durable_history_after_redis_flush(
 
 
 @pytest.mark.asyncio
+async def test_publish_caches_an_already_committed_event_without_writing_it_twice(
+    engine: AsyncEngine,
+    redis_client: Redis,
+) -> None:
+    repository = TaskRepository(engine)
+    await create_pending_task(repository)
+    event = await repository.transition_task(
+        transition(
+            status=TaskStatus.PLANNING,
+            progress=5,
+            step_id="planning",
+            agent=AgentName.MASTER,
+        )
+    )
+
+    store = EventStore(repository, redis_client)
+    assert await store.publish(event)
+
+    assert await repository.list_events(TASK_ID) == (event,)
+    replay = await store.replay(TASK_ID)
+    assert replay.source is ReplaySource.CACHE
+    assert replay.events == (event,)
+
+
+@pytest.mark.asyncio
 async def test_redis_unavailability_never_loses_history_or_falsifies_task_state(
     engine: AsyncEngine,
 ) -> None:

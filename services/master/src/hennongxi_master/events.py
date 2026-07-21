@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from uuid import UUID
 
+import structlog
 from hennongxi_contracts import TaskEvent
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
@@ -15,6 +16,7 @@ from hennongxi_master.repository import TaskRepository, TransitionCreate
 
 MAX_REPLAY_EVENTS = 1000
 DEFAULT_MAX_EVENTS_PER_TASK = 1000
+_LOGGER = structlog.get_logger("hennongxi.master.events")
 
 
 class ReplaySource(StrEnum):
@@ -58,7 +60,31 @@ class EventStore:
     async def append(self, transition: TransitionCreate) -> EventAppendResult:
         """Persist a transition and then copy its immutable event into Redis."""
         event = await self._repository.transition_task(transition)
-        return EventAppendResult(event=event, cached=await self._cache_event(event))
+        return EventAppendResult(event=event, cached=await self.publish(event))
+
+    async def publish(self, event: TaskEvent) -> bool:
+        """Copy one already committed event into the rebuildable Redis stream."""
+        try:
+            await self._redis.xadd(
+                task_event_stream_key(event.task_id),
+                {"event": event.model_dump_json()},
+                # Stable database sequence IDs make Redis order independently auditable.
+                id=f"{event.sequence}-0",
+                # Exact MAXLEN keeps retention truly bounded, not approximately bounded.
+                # Source: https://redis.io/docs/latest/commands/xadd/
+                maxlen=self._max_events_per_task,
+                approximate=False,
+            )
+        except RedisError as error:
+            # PostgreSQL already committed. Cache loss must never rewrite task truth.
+            _LOGGER.warning(
+                "task_event_cache_unavailable",
+                task_id=str(event.task_id),
+                sequence=event.sequence,
+                error_type=type(error).__name__,
+            )
+            return False
+        return True
 
     async def replay(
         self,
@@ -89,23 +115,6 @@ class EventStore:
         if cached == durable:
             return EventReplay(events=cached, source=ReplaySource.CACHE)
         return EventReplay(events=durable, source=ReplaySource.DURABLE)
-
-    async def _cache_event(self, event: TaskEvent) -> bool:
-        try:
-            await self._redis.xadd(
-                task_event_stream_key(event.task_id),
-                {"event": event.model_dump_json()},
-                # Stable database sequence IDs make Redis order independently auditable.
-                id=f"{event.sequence}-0",
-                # Exact MAXLEN keeps retention truly bounded, not approximately bounded.
-                # Source: https://redis.io/docs/latest/commands/xadd/
-                maxlen=self._max_events_per_task,
-                approximate=False,
-            )
-        except RedisError:
-            # PostgreSQL already committed. Cache loss must never rewrite task truth.
-            return False
-        return True
 
     async def _read_cached(
         self,

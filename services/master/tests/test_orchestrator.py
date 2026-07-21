@@ -225,6 +225,16 @@ class _Planner:
         )
 
 
+class _EventPublisher:
+    def __init__(self, *, available: bool = True) -> None:
+        self.available = available
+        self.events: list[TaskEvent] = []
+
+    async def publish(self, event: TaskEvent) -> bool:
+        self.events.append(event)
+        return self.available
+
+
 class _FailingPlanner:
     async def create_plan(self, task: TaskResponse) -> PlanningOutcome:
         del task
@@ -333,8 +343,12 @@ class _Agents:
 async def test_orchestrator_completes_fixed_chain_with_one_durable_identity() -> None:
     repository = _Repository()
     agents = _Agents()
+    publisher = _EventPublisher()
 
-    result = await TaskOrchestrator(repository, agents, _Planner()).run(TASK_ID, attempt=1)
+    result = await TaskOrchestrator(repository, agents, _Planner(), publisher).run(
+        TASK_ID,
+        attempt=1,
+    )
 
     assert result.status is TaskStatus.COMPLETED
     assert result.progress == 100
@@ -375,6 +389,23 @@ async def test_orchestrator_completes_fixed_chain_with_one_durable_identity() ->
         and command.correlation_id == CORRELATION_ID
         for command in agents.commands
     )
+    assert [event.sequence for event in publisher.events] == list(
+        range(1, len(repository.records) + 1)
+    )
+
+
+@pytest.mark.asyncio
+async def test_redis_publish_failure_never_fails_durable_orchestration() -> None:
+    repository = _Repository()
+    publisher = _EventPublisher(available=False)
+
+    result = await TaskOrchestrator(repository, _Agents(), _Planner(), publisher).run(
+        TASK_ID,
+        attempt=1,
+    )
+
+    assert result.status is TaskStatus.COMPLETED
+    assert len(publisher.events) == len(repository.records)
 
 
 @pytest.mark.asyncio
