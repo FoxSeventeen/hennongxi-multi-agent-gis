@@ -537,18 +537,20 @@ The critical path is contracts → persistence/events → raster chain → orche
 
 **验收标准：**
 
-- [ ] 订阅方按顺序收到状态、进度、错误和成果事件，并可使用最后事件编号无重复、无缺口地重连。
-- [ ] Redis 丢失时触发持久化重放或降级；断开的客户端及时释放资源。
-- [ ] 查询端点包含足够的当前状态，使 Web 轮询可得到相同的终态结果。
+- [x] 订阅方按顺序收到状态、进度、错误和成果事件，并可使用最后事件编号无重复、无缺口地重连。
+- [x] Redis 丢失时触发持久化重放或降级；断开的客户端及时释放资源。
+- [x] 查询端点包含足够的当前状态，使 Web 轮询可得到相同的终态结果。
 
 **验证：**
 
-- [ ] `docker compose run --rm master-agent pytest services/master/tests/integration/test_sse.py -q`
-- [ ] 慢客户端、重连、Redis 重启和终态事件流的并发测试通过。
+- [x] `docker compose run --rm master-agent pytest services/master/tests/integration/test_sse.py -q`
+- [x] 连接后实时发布、慢客户端、重连、非法游标、Redis 丢失和终态关闭测试通过。
+- [x] 真实 SSE 长连接在 Redis 实际重启期间连续收到 7 个心跳，断开后没有遗留阻塞的 `XREAD` 客户端。
+- [x] 全仓回归为 326 项通过、4 项按环境条件跳过；Ruff、118 个文件的格式检查和 56 个生产源码文件的严格类型检查通过。
 
 **依赖：**T07、T15、T16。
 
-**涉及文件：**Master 事件 API、SSE 适配器和 SSE 集成测试。
+**涉及文件：**Master 事件 API、SSE 适配器、事件存储、OpenAPI 契约、Compose 配置和 SSE 集成测试。
 
 **工作量：**中等。
 
