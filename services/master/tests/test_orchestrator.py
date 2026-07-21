@@ -43,6 +43,11 @@ from hennongxi_master.repository import (
     RecoverySnapshot,
     TransitionCreate,
 )
+from hennongxi_master.study_area import (
+    StudyAreaConclusion,
+    StudyAreaEvidence,
+    StudyAreaReasonCode,
+)
 
 TASK_ID = UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
 OTHER_TASK_ID = UUID("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
@@ -302,6 +307,31 @@ class _Planner:
         )
 
 
+class _Grounder:
+    def __init__(self, evidence: StudyAreaEvidence) -> None:
+        self.evidence = evidence
+        self.queries: list[str] = []
+
+    async def verify_query(self, query: str) -> StudyAreaEvidence:
+        self.queries.append(query)
+        return self.evidence
+
+
+def _location_evidence(
+    conclusion: StudyAreaConclusion,
+    reason_code: StudyAreaReasonCode,
+    *,
+    duration_ms: int = 12,
+) -> StudyAreaEvidence:
+    return StudyAreaEvidence(
+        conclusion=conclusion,
+        checked_at=NOW,
+        duration_ms=duration_ms,
+        reason_code=reason_code,
+        retryable=reason_code is StudyAreaReasonCode.ONLINE_CHECK_UNAVAILABLE,
+    )
+
+
 class _EventPublisher:
     def __init__(self, *, available: bool = True) -> None:
         self.available = available
@@ -468,6 +498,104 @@ async def test_orchestrator_completes_fixed_chain_with_one_durable_identity() ->
     assert isinstance(completed_steps["publish_results"], PublisherPublishResult)
     assert [event.sequence for event in publisher.events] == list(
         range(1, len(repository.records) + 1)
+    )
+
+
+@pytest.mark.asyncio
+async def test_verified_study_area_is_persisted_before_planning_without_changing_data() -> None:
+    repository = _Repository()
+    agents = _Agents()
+    grounder = _Grounder(
+        _location_evidence(
+            StudyAreaConclusion.VERIFIED,
+            StudyAreaReasonCode.ONLINE_MATCH_CONFIRMED,
+        )
+    )
+
+    result = await TaskOrchestrator(
+        repository,
+        agents,
+        _Planner(),
+        study_area_grounder=grounder,
+    ).run(TASK_ID, attempt=1)
+
+    assert result.status is TaskStatus.COMPLETED
+    assert grounder.queries == [repository.task.query]
+    planning_event = repository.records[0]
+    assert planning_event.target_status is TaskStatus.PLANNING
+    assert planning_event.message == (
+        "在线位置校验通过（ONLINE_MATCH_CONFIRMED）；正在生成受约束的执行计划"
+    )
+    assert planning_event.occurred_at == NOW
+    assert planning_event.elapsed_ms == 12
+    data_command = agents.commands[0]
+    assert isinstance(data_command, DataPrepareCommand)
+    assert data_command.dataset_ids == tuple(LogicalDatasetId)
+
+
+@pytest.mark.asyncio
+async def test_degraded_location_evidence_is_refreshed_for_recovered_retry() -> None:
+    repository = _Repository()
+    repository.task = repository.task.model_copy(update={"current_attempt": 2})
+    repository.recovery = _recovery_snapshot("publish_results")
+    planner = _Planner()
+    grounder = _Grounder(
+        _location_evidence(
+            StudyAreaConclusion.DEGRADED,
+            StudyAreaReasonCode.ONLINE_CHECK_UNAVAILABLE,
+            duration_ms=25,
+        )
+    )
+
+    result = await TaskOrchestrator(
+        repository,
+        _Agents(),
+        planner,
+        study_area_grounder=grounder,
+    ).run(TASK_ID, attempt=2)
+
+    assert result.status is TaskStatus.COMPLETED
+    assert planner.calls == 0
+    assert grounder.queries == [repository.task.query]
+    planning_event = repository.records[0]
+    assert planning_event.message == (
+        "在线位置校验已降级（ONLINE_CHECK_UNAVAILABLE）；使用 G2 本地权威数据恢复已验证的执行计划"
+    )
+    assert planning_event.elapsed_ms == 25
+
+
+@pytest.mark.asyncio
+async def test_legacy_out_of_scope_task_is_rejected_before_planning() -> None:
+    repository = _Repository()
+    repository.task = repository.task.model_copy(update={"query": "分析武汉市东湖植被变化"})
+    agents = _Agents()
+    planner = _Planner()
+    grounder = _Grounder(
+        _location_evidence(
+            StudyAreaConclusion.REJECTED,
+            StudyAreaReasonCode.OUT_OF_SCOPE_STUDY_AREA,
+            duration_ms=0,
+        )
+    )
+
+    result = await TaskOrchestrator(
+        repository,
+        agents,
+        planner,
+        study_area_grounder=grounder,
+    ).run(TASK_ID, attempt=1)
+
+    assert result.status is TaskStatus.FAILED
+    assert result.last_error is not None
+    assert result.last_error.code is ErrorCode.VALIDATION_ERROR
+    assert result.last_error.message == "目前仅支持神农溪流域生态变化监测"
+    assert planner.calls == 0
+    assert agents.commands == []
+    assert len(repository.records) == 1
+    rejected_event = repository.records[0]
+    assert rejected_event.target_status is TaskStatus.FAILED
+    assert rejected_event.message == (
+        "研究区校验已拒绝（OUT_OF_SCOPE_STUDY_AREA）：目前仅支持神农溪流域生态变化监测"
     )
 
 

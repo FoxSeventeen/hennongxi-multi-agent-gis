@@ -41,6 +41,11 @@ from hennongxi_master.repository import (
     RecoverySnapshot,
     TransitionCreate,
 )
+from hennongxi_master.study_area import (
+    StudyAreaConclusion,
+    StudyAreaEvidence,
+    StudyAreaGrounder,
+)
 
 _LOGGER = structlog.get_logger("hennongxi.master.orchestrator")
 _IDEMPOTENCY_NAMESPACE = UUID("917e647d-2f28-4dcc-9d05-27003c72e9bb")
@@ -121,6 +126,10 @@ class TaskPlanner(Protocol):
     async def create_plan(self, task: TaskResponse) -> PlanningOutcome: ...
 
 
+class StudyAreaGrounding(Protocol):
+    async def verify_query(self, query: str) -> StudyAreaEvidence: ...
+
+
 class OrchestrationConflict(RuntimeError):
     """Raised when a worker cannot safely start the requested task attempt."""
 
@@ -135,6 +144,7 @@ class TaskOrchestrator:
         planner: TaskPlanner,
         event_publisher: EventPublisher | None = None,
         *,
+        study_area_grounder: StudyAreaGrounding | None = None,
         now: Callable[[], datetime] | None = None,
     ) -> None:
         self._repository = repository
@@ -142,6 +152,10 @@ class TaskOrchestrator:
         self._planner = planner
         self._event_publisher = event_publisher
         self._now = now or _utc_now
+        self._study_area_grounder = study_area_grounder or StudyAreaGrounder(
+            None,
+            now=self._now,
+        )
 
     async def run(self, task_id: UUID, *, attempt: int) -> TaskResponse:
         task = await self._repository.get_task(task_id)
@@ -155,6 +169,39 @@ class TaskOrchestrator:
             "attempt": attempt,
             "correlation_id": str(task.correlation_id),
         }
+        study_area = await self._study_area_grounder.verify_query(task.query)
+        _LOGGER.info(
+            "study_area_grounded",
+            **identity,
+            conclusion=study_area.conclusion.value,
+            reason_code=study_area.reason_code.value,
+            duration_ms=study_area.duration_ms,
+            retryable=study_area.retryable,
+        )
+        if study_area.conclusion is StudyAreaConclusion.REJECTED:
+            error = StructuredError(
+                code=ErrorCode.VALIDATION_ERROR,
+                message="目前仅支持神农溪流域生态变化监测",
+                retryable=False,
+            )
+            await self._persist_transition(
+                TransitionCreate(
+                    task_id=task.task_id,
+                    attempt=attempt,
+                    step_id="planning",
+                    agent=AgentName.MASTER,
+                    target_status=TaskStatus.FAILED,
+                    progress=0,
+                    message=(
+                        f"研究区校验已拒绝（{study_area.reason_code.value}）：{error.message}"
+                    ),
+                    elapsed_ms=study_area.duration_ms,
+                    occurred_at=study_area.checked_at,
+                    error=error,
+                )
+            )
+            return await self._failed_task(task, attempt, TaskStatus.PENDING, error)
+
         recovery = await self._repository.get_recovery_snapshot(task.task_id, attempt)
         if recovery is not None:
             _LOGGER.info(
@@ -171,11 +218,12 @@ class TaskOrchestrator:
             agent=AgentName.MASTER,
             target_status=TaskStatus.PLANNING,
             progress=5,
-            message=(
-                "正在恢复已验证的执行计划"
-                if recovery is not None and recovery.plan is not None
-                else "正在生成受约束的执行计划"
+            message=_planning_message(
+                study_area,
+                recovering=recovery is not None and recovery.plan is not None,
             ),
+            elapsed_ms=study_area.duration_ms,
+            occurred_at=study_area.checked_at,
         )
 
         reused_plan = recovery is not None and recovery.plan is not None
@@ -682,6 +730,7 @@ class TaskOrchestrator:
         progress: int,
         message: str,
         elapsed_ms: int = 0,
+        occurred_at: datetime | None = None,
         step_status: StepStatus | None = None,
         step_progress: int | None = None,
         step_started_at: datetime | None = None,
@@ -703,7 +752,7 @@ class TaskOrchestrator:
                 progress=progress,
                 message=message,
                 elapsed_ms=elapsed_ms,
-                occurred_at=self._now(),
+                occurred_at=occurred_at or self._now(),
                 step_status=step_status,
                 step_progress=step_progress,
                 step_started_at=step_started_at,
@@ -861,6 +910,15 @@ def _idempotency_key(task_id: UUID, attempt: int, step_id: str) -> UUID:
 
 def _utc_now() -> datetime:
     return datetime.now(UTC)
+
+
+def _planning_message(evidence: StudyAreaEvidence, *, recovering: bool) -> str:
+    planning_action = "恢复已验证的执行计划" if recovering else "正在生成受约束的执行计划"
+    if evidence.conclusion is StudyAreaConclusion.VERIFIED:
+        return f"在线位置校验通过（{evidence.reason_code.value}）；{planning_action}"
+    return (
+        f"在线位置校验已降级（{evidence.reason_code.value}）；使用 G2 本地权威数据{planning_action}"
+    )
 
 
 def _elapsed_ms(started: float) -> int:
