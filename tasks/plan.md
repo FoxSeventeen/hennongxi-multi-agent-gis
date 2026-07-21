@@ -668,26 +668,60 @@ The critical path is contracts → persistence/events → raster chain → orche
 
 ### Phase 8: Results and end-to-end proof
 
-#### Task 22: Present quality, statistics, report download, and retry controls
+#### 任务 22：展示质量、统计、报告下载与重试控制
 
-**Description:** Complete the results experience with both NDVI summaries, change/area statistics, four quality metrics and conclusion, artifact/report links, visible LLM-call evidence, and contextual retry for failures.
+**说明：**完成结果体验，展示双时相日期、NDVI 变化面积统计、四项质量指标与结论、
+任务绑定报告、可见的大模型调用证据，并为失败任务提供上下文明确的安全重试入口。
 
-**Acceptance criteria:**
+**契约补充：**现有 `GET /api/v1/tasks/{task_id}` 响应增加当前尝试的可空
+`analysis` 与 `quality` 字段；Master 只从已校验的当前尝试步骤输出重建它们，Web 再次
+严格校验任务、尝试次数、关联标识、成果完整性和报告相对路径。重试继续使用既有
+`POST /api/v1/tasks/{task_id}/retry`，不新增公开路由。
 
-- [ ] Completed tasks display dates, NDVI/change statistics, area units/classes, coverage, valid pixels, completeness, elapsed time, quality conclusion, and PDF download.
-- [ ] The UI distinguishes real LLM planning from labeled recovery and never renders a failed/incomplete run as complete.
-- [ ] Failed tasks show the responsible step/error and a guarded retry action that creates/follows the new attempt.
+**验收标准：**
 
-**Verification:**
+- [x] 完成任务显示前后日期、增稳减与有效面积（公顷）、覆盖率、有效像元率、输出
+  完整性、分析耗时、质量结论和中文 PDF 下载。
+- [x] 界面明确区分真实大模型规划与内置恢复计划，失败或未完成任务不会显示“通过”或
+  报告下载入口。
+- [x] 失败任务显示责任 Agent、步骤与结构化错误；仅可重试错误显示操作，提交期间锁定
+  重复请求，接受后跟随新尝试并保留旧失败证据。
 
-- [ ] `docker compose run --rm web npm test -- --run -t 'results|quality|report|retry'`
-- [ ] Browser check downloads a valid task-matching PDF and completes one forced retry.
+**验证：**
 
-**Dependencies:** T13, T14, T18, T20.
+- [x] 专项命令
+  `docker compose run --rm --no-deps web npm test -- --run -t 'results|quality|report|retry'`
+  通过 13 项；Web 全量 46 项、ESLint、TypeScript、生产构建和 OpenAPI 类型同步通过。
+- [x] 后端共享契约 59 项、OpenAPI、Ruff、110 个文件格式检查和 57 个源码文件 Mypy
+  通过；此前 T22 仓储/API 定向回归分别通过 14 项与 61 项。
+- [x] 真实任务 `b38520aa-beae-4446-a4a2-528cf0c045a4` 第 1 次执行在强制停止
+  Publisher 后于 80% 如实失败；恢复服务并从界面重试后，第 2 次只复用已校验的
+  Data、Analysis、Quality 检查点并完成 Publisher，时间线没有被旧尝试终态截断。
+- [x] 同一任务展示真实模型 `claude-sonnet-4-6`、四项质量通过、2019-08-19 至
+  2024-08-12 的面积统计；桌面与 390×844 真实浏览器布局无溢出，控制台警告/错误为 0，
+  任务、瓦片与报告请求均成功。
+- [x] 下载报告为 2 页 A4、61,412 字节，文本与元数据均包含相同任务 ID 和第 2 次尝试；
+  `Content-Type`、安全附件文件名、`ETag` 与 SHA-256
+  `5ee2b1f71ab17dc1ed1c02bd10ea6ac415686916641aa3eda982b70a31f515e6` 一致，逐页
+  渲染无缺字、截断、重叠或空白孤页。
+- [x] 五轴代码审查未发现剩余阻断项，并修正了成果面板加入后“成果证据”和“运行环境”
+  重复使用章节号 03 的答辩可读性问题。
 
-**Files likely touched:** `apps/web/src/features/results/`, retry/report client code, result tests.
+**依赖：**T13、T14、T18、T20。
 
-**Estimated scope:** M.
+**实际修改文件：**`apps/web/src/features/results/`、任务查询/重试客户端与严格契约解析、
+时间线跨尝试游标恢复、应用与结果样式/测试、共享任务契约/OpenAPI，以及 Master 当前尝试
+结果重建。
+
+**实施提交：**`9d82884`、`94375bb`、`1af2006`、`39c1ca6`、`06d025b`。
+
+**工作量：**中等。
+
+#### 检查点 G2：结果与恢复体验
+
+- [x] T21-T22 的测试、Lint、类型、构建和契约检查通过，真实浏览器控制台与必需网络
+  请求干净。
+- [x] 无需阅读代码即可理解任务、Agent 链、地图、质量、失败、重试和任务绑定报告。
 
 #### Task 23: Prove contracts and the deterministic full Agent chain
 

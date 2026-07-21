@@ -175,15 +175,15 @@ Source of truth: `docs/spec.md` at `92e50a6`. Detailed rationale, file scope, an
   - [x] 适配完整流域，并在边界始终可见的情况下切换前后期 NDVI 与差值图层。
   - [x] 匹配 Publisher 的日期、边界、图例、颜色、单位和数据归属，并处理瓦片错误。
   - [x] 通过组件测试以及真实浏览器的瓦片网络、控制台和视觉检查。
-- [ ] **T22 Present results/report/retry** (depends: T13-T14, T18, T20)
-  - [ ] Show NDVI/change/area stats, four quality metrics, conclusion, LLM evidence, and PDF.
-  - [ ] Distinguish real/fallback planning and failure/incomplete/completed states honestly.
-  - [ ] Pass result/report download and forced-retry browser checks.
+- [x] **T22 展示成果、报告与重试**（依赖：T13-T14、T18、T20）
+  - [x] 展示双时相日期、NDVI 变化面积、四项质量指标与结论、真实大模型证据和中文 PDF。
+  - [x] 明确区分真实/恢复规划以及失败、未完成、完成状态，不把部分结果伪装成成功。
+  - [x] 通过报告下载、桌面/窄视口和 Publisher 强制失败后界面安全重试的真实浏览器检查。
 
-### Checkpoint G2
+### 检查点 G2（第 8 天界面验收）
 
-- [ ] T21-T22 tests/lint/types pass with clean browser console/network behavior.
-- [ ] A teacher can understand the task, Agent chain, maps, quality, failure, retry, and report without code.
+- [x] T21-T22 的测试、Lint、类型、构建和契约检查通过，浏览器控制台与必需网络请求干净。
+- [x] 答辩教师无需阅读代码即可理解任务、Agent 链、地图、质量、失败、重试和报告。
 
 ## Day 9 — End-to-end proof and hardening
 
