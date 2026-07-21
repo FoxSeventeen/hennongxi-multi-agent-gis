@@ -141,6 +141,7 @@ describe("readiness application shell", () => {
     render(<App client={createClient({ getTask, streamTaskEvents })} />);
 
     expect(await screen.findByRole("heading", { level: 2, name: "Agent 执行时间线" })).toBeVisible();
+    expect(screen.getByRole("heading", { level: 2, name: "监测成果与质量" })).toBeVisible();
     expect(screen.getByText(taskId)).toBeVisible();
     expect(await screen.findByText("任务已完成")).toBeVisible();
     expect(getTask).toHaveBeenCalledWith(taskId);

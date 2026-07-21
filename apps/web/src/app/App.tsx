@@ -4,6 +4,7 @@ import type { AcceptedTask, MasterClient, ReadinessSnapshot } from "../api/clien
 import { MapWorkspace } from "../components/MapWorkspace";
 import { ReadinessPanel } from "../components/ReadinessPanel";
 import { TaskComposer } from "../components/TaskComposer";
+import { ResultPanel } from "../features/results/ResultPanel";
 import { TaskTimelineView } from "../features/timeline/TaskTimeline";
 import { useTaskTimeline } from "../features/timeline/useTaskTimeline";
 import "./app.css";
@@ -96,7 +97,13 @@ export function App({ client, publisherBaseUrl = "http://localhost:8004" }: AppP
               }}
             />
           ) : taskLocation.taskId === null ? null : (
-            <TaskTimelineView state={timelineState} />
+            <>
+              <TaskTimelineView state={timelineState} />
+              <ResultPanel
+                snapshot={timelineState.snapshot}
+                publisherBaseUrl={publisherBaseUrl}
+              />
+            </>
           )}
           <TaskComposer
             client={client}
