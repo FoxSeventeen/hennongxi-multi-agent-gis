@@ -373,7 +373,8 @@ The critical path is contracts → persistence/events → raster chain → orche
 
 **Verification:**
 
-- [x] `docker compose run --rm analysis-agent pytest services/analysis_agent/tests/unit -q --cov=hennongxi_analysis_agent --cov-branch --cov-fail-under=90`
+- [x] 纯栅格逻辑模块的定向分支覆盖命令通过，20 项测试、分支覆盖率 95.72%；HTTP、执行器和
+  原子存储由 T10 集成测试负责，不计入 T09 的纯逻辑覆盖分母。
 - [x] Critical pure raster logic reaches at least 90% branch coverage.
 
 **Dependencies:** T01, T02; T05 supplies the later real-data check but unit fixtures are generated at test time.
@@ -870,22 +871,36 @@ The critical path is contracts → persistence/events → raster chain → orche
 
 **验收标准：**
 
-- [ ] 所有内部/公开请求与响应都通过同一套共享版本化 Schema/OpenAPI，没有重复且漂移的模型。
-- [ ] 高德验证和降级两条确定性链都到达预期终态；完成链的栅格、统计、质量和报告结果在同一
+- [x] 所有内部/公开请求与响应都通过同一套共享版本化 Schema/OpenAPI，没有重复且漂移的模型。
+- [x] 高德验证和降级两条确定性链都到达预期终态；完成链的栅格、统计、质量和报告结果在同一
   `task_id` 下数学可复现。
-- [ ] 损坏数据、非法 LLM 计划、非目标地区、不可达 Agent 和部分成果均进入规定失败/拒绝状态，
+- [x] 损坏数据、非法 LLM 计划、非目标地区、不可达 Agent 和部分成果均进入规定失败/拒绝状态，
   不产生虚假成功。
 
 **验证：**
 
-- [ ] `docker compose run --rm master pytest tests/integration -q`
-- [ ] 后端单元、契约、集成测试与关键分支覆盖门槛一起通过。
+- [x] 隔离项目构建当前镜像、迁移独立 PostGIS 后执行 `pytest tests/integration -q`，8 项通过。
+- [x] 后端单元、契约、集成测试与关键分支覆盖门槛一起通过。
 
 **依赖：**T08、T10-T18、T24。
 
 **预计修改文件：**`tests/integration/`、共享夹具工厂、假 LLM/高德服务。
 
 **工作量：**中等。
+
+**实际结果：**新增共享 4×4 米制真实 GeoTIFF/完整流域夹具和无网络进程内 HTTP 路由器；假
+LLM/高德经 Master Worker、真实 PostGIS 和四个真实 FastAPI Agent 边界完成同一固定任务身份
+的验证/降级重放。五个分析成果 SHA-256 完全一致，面积分别为增加 0.04、稳定 0.08、减少
+0.04、有效 0.16 公顷，质量覆盖率与有效像元率均为 100%，PDF 数学正文一致。非法 LLM 计划
+只以 `BUILTIN_RECOVERY` 完成且持久化 `FAILED/LLM_PLAN_INVALID`；其余四类失败均未发布 PDF。
+
+**实际修改文件：**`tests/fixtures/deterministic_gis.py`、`tests/integration/`、
+`.gitignore`、`docs/development.md`、`tasks/plan.md`、`tasks/todo.md`。
+
+**验证结果：**T25 隔离 Compose 测试 8 项通过；无数据库本地后端回归 426 项通过、48 项按
+环境条件跳过；Ruff、122 个文件的格式检查、60 个生产源码文件的严格类型检查和 OpenAPI
+验证通过；纯栅格逻辑 20 项通过，分支覆盖率 95.72%。本地直接执行全仓测试时，迁移测试会因
+缺少 `DATABASE_URL` 失败，因此数据库测试只按文档在隔离 Compose 项目中执行。
 
 #### 任务 26：自动化关键 Compose 浏览器旅程
 
