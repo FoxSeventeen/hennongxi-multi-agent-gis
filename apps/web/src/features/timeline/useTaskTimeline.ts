@@ -5,6 +5,12 @@ import type { TaskEvent, TaskSnapshot, TaskStatus } from "../../api/task-contrac
 
 const defaultRetryDelaysMs = [1_000, 2_000, 4_000, 8_000] as const;
 const terminalStatuses = new Set<TaskStatus>(["COMPLETED", "FAILED"]);
+const postPlanningStatuses = new Set<TaskStatus>([
+  "DATA_PREPARING",
+  "ANALYZING",
+  "QUALITY_CHECKING",
+  "PUBLISHING",
+]);
 
 export type TimelineConnection =
   | "loading"
@@ -44,6 +50,8 @@ export function useTaskTimeline(
     const eventsBySequence = new Map<number, TaskEvent>();
     let lastSequence = 0;
     let fatalFailure = false;
+    let latestSnapshot: TaskSnapshot | null = null;
+    let planRefreshPending = false;
 
     setSnapshot(null);
     setEvents([]);
@@ -57,23 +65,33 @@ export function useTaskTimeline(
       eventsBySequence.set(event.sequence, event);
       lastSequence = Math.max(lastSequence, event.sequence);
       setEvents([...eventsBySequence.values()].sort((left, right) => left.sequence - right.sequence));
-      setSnapshot((current) =>
-        current === null
-          ? current
-          : {
-              ...current,
-              status: event.status,
-              progress: event.progress,
-              currentAttempt: Math.max(current.currentAttempt, event.attempt),
-              updatedAt: event.occurredAt,
-              lastError: event.error ?? current.lastError,
-            },
-      );
+      if (latestSnapshot !== null) {
+        latestSnapshot = {
+          ...latestSnapshot,
+          status: event.status,
+          progress: event.progress,
+          currentAttempt: Math.max(latestSnapshot.currentAttempt, event.attempt),
+          updatedAt: event.occurredAt,
+          lastError: event.error ?? latestSnapshot.lastError,
+        };
+        setSnapshot(latestSnapshot);
+        if (
+          latestSnapshot.plan === null &&
+          postPlanningStatuses.has(event.status) &&
+          !planRefreshPending
+        ) {
+          planRefreshPending = true;
+          void refreshSnapshot().finally(() => {
+            planRefreshPending = false;
+          });
+        }
+      }
     }
 
     async function refreshSnapshot(): Promise<TaskSnapshot | null> {
       try {
         const nextSnapshot = await client.getTask(taskId);
+        latestSnapshot = nextSnapshot;
         if (!isStopped(controller.signal)) {
           setSnapshot(nextSnapshot);
           setProblem(null);

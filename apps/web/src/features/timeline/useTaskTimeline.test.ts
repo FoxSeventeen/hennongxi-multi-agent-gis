@@ -186,6 +186,61 @@ describe("timeline SSE and polling recovery", () => {
     expect(streamTaskEvents).not.toHaveBeenCalled();
   });
 
+  it("refreshes the plan when streaming advances beyond planning", async () => {
+    const pendingSnapshot = snapshot("PENDING", 0);
+    const plannedSnapshot: TaskSnapshot = {
+      ...snapshot("DATA_PREPARING", 10),
+      plan: {
+        planId: "354da501-f92e-432d-8367-c845c16d6a07",
+        source: "REAL_LLM",
+        createdAt: "2024-08-12T08:30:01Z",
+        modelCall: null,
+        steps: [
+          {
+            stepId: "prepare_data",
+            kind: "prepare_data",
+            agent: "data",
+            order: 1,
+            title: "准备神农溪流域数据",
+            dependsOn: [],
+          },
+        ],
+      },
+    };
+    const getTask = vi
+      .fn<MasterClient["getTask"]>()
+      .mockResolvedValueOnce(pendingSnapshot)
+      .mockResolvedValueOnce(plannedSnapshot);
+    const streamTaskEvents = vi.fn<MasterClient["streamTaskEvents"]>(async (_id, options) => {
+      options.onEvent({
+        ...event(1, "DATA_PREPARING", 10),
+        stepId: "prepare_data",
+        agent: "data",
+      });
+      await new Promise<void>((resolve) => {
+        options.signal.addEventListener(
+          "abort",
+          () => {
+            resolve();
+          },
+          { once: true },
+        );
+      });
+    });
+    const masterClient = client({ getTask, streamTaskEvents });
+    const retryDelaysMs = [0] as const;
+
+    const { result, unmount } = renderHook(() =>
+      useTaskTimeline(masterClient, taskId, { retryDelaysMs }),
+    );
+
+    await waitFor(() => {
+      expect(result.current.snapshot?.plan?.steps).toHaveLength(1);
+    });
+    expect(getTask).toHaveBeenCalledTimes(2);
+    unmount();
+  });
+
   it("aborts the active stream when the timeline unmounts", async () => {
     let streamSignal: AbortSignal | null = null;
     const getTask = vi.fn<MasterClient["getTask"]>().mockResolvedValue(snapshot("ANALYZING", 40));
