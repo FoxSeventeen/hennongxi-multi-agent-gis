@@ -16,7 +16,8 @@ AGENT_SERVICES = {
     "quality-agent",
     "publisher-agent",
 }
-ALL_SERVICES = AGENT_SERVICES | {"web", "postgis", "redis"}
+RUNTIME_SERVICES = AGENT_SERVICES | {"web", "postgis", "redis"}
+PROFILE_SERVICES = {"e2e"}
 
 
 def load_compose() -> dict[str, Any]:
@@ -37,7 +38,7 @@ def volume_mounts(service: dict[str, Any]) -> dict[tuple[str, str], dict[str, An
 def test_compose_declares_the_complete_runtime_topology() -> None:
     compose = load_compose()
 
-    assert set(compose["services"]) == ALL_SERVICES
+    assert set(compose["services"]) == RUNTIME_SERVICES | PROFILE_SERVICES
     assert set(compose["volumes"]) == {
         "postgres-data",
         "redis-data",
@@ -148,7 +149,22 @@ def test_dependencies_wait_for_healthy_services_without_cycles() -> None:
             dependency["condition"] == "service_healthy" for dependency in dependencies.values()
         )
 
-    assert all("healthcheck" in service for service in services.values())
+    assert all("healthcheck" in services[name] for name in RUNTIME_SERVICES)
+
+
+def test_e2e_runner_is_explicit_and_waits_for_the_browser_target() -> None:
+    service = load_compose()["services"]["e2e"]
+
+    assert service["profiles"] == ["e2e"]
+    assert service["depends_on"] == {"web": {"condition": "service_healthy"}}
+    assert service["networks"] == ["public"]
+    assert "ports" not in service
+    assert service["security_opt"] == ["no-new-privileges:true"]
+    assert service["cap_drop"] == ["ALL"]
+    assert {mount["target"] for mount in service["volumes"]} == {
+        "/work/playwright-report",
+        "/work/test-results",
+    }
 
 
 def test_application_containers_are_non_privileged_and_read_only() -> None:
@@ -176,6 +192,7 @@ def test_images_are_pinned_and_default_to_arm64() -> None:
         "backend": ROOT / "infra/docker/backend.Dockerfile",
         "web": ROOT / "apps/web/Dockerfile",
         "postgis": ROOT / "infra/db/postgis/Dockerfile",
+        "e2e": ROOT / "tests/e2e/Dockerfile",
     }
     contents = {name: path.read_text(encoding="utf-8") for name, path in dockerfiles.items()}
 
@@ -183,5 +200,6 @@ def test_images_are_pinned_and_default_to_arm64() -> None:
     assert "ghcr.io/astral-sh/uv:0.11.29" in contents["backend"]
     assert "node:24.18.0-bookworm-slim" in contents["web"]
     assert "postgres:17.10-bookworm" in contents["postgis"]
+    assert "mcr.microsoft.com/playwright:v1.61.1-noble" in contents["e2e"]
     assert all(":latest" not in content for content in contents.values())
     assert all("docker/dockerfile" not in content for content in contents.values())

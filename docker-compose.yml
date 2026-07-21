@@ -281,6 +281,34 @@ services:
       retries: 5
       start_period: 5s
 
+  e2e:
+    profiles: ["e2e"]
+    image: hennongxi/e2e:0.1.0
+    build:
+      context: tests/e2e
+      dockerfile: Dockerfile
+    platform: ${TARGET_PLATFORM:-linux/arm64}
+    init: true
+    ipc: host
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    environment:
+      CI: "1"
+    networks:
+      - public
+    volumes:
+      - type: bind
+        source: ./tests/e2e/test-results
+        target: /work/test-results
+      - type: bind
+        source: ./tests/e2e/playwright-report
+        target: /work/playwright-report
+    depends_on:
+      web:
+        condition: service_healthy
+
 networks:
   public:
     driver: bridge
