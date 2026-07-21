@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from typing import Any, Self
 from uuid import UUID, uuid4
 
@@ -21,6 +22,7 @@ from hennongxi_contracts import (
     PlanStepKind,
     PublisherPublishResult,
     QualityEvaluateResult,
+    RetryAcceptedResponse,
     StepStatus,
     StructuredError,
     TaskEvent,
@@ -186,6 +188,13 @@ class WorkerClaim(RepositoryInput):
     released_at: UtcDateTime | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class RetryAttemptResult:
+    response: RetryAcceptedResponse
+    event: TaskEvent | None
+    created: bool
+
+
 class RepositoryNotFound(LookupError):
     """Raised when a requested durable record does not exist."""
 
@@ -296,6 +305,138 @@ class TaskRepository:
         if result is None:
             raise RuntimeError("created task could not be reconstructed")
         return result
+
+    async def retry_failed_task(
+        self,
+        task_id: UUID,
+        *,
+        accepted_at: UtcDateTime,
+    ) -> RetryAttemptResult:
+        """Atomically create one retry attempt or return its in-flight duplicate."""
+
+        accepted_at = _UTC_DATETIME.validate_python(accepted_at)
+        async with self._sessions.begin() as session:
+            task = (
+                (
+                    await session.execute(
+                        text(
+                            "SELECT status, current_attempt, correlation_id FROM tasks "
+                            "WHERE task_id = :task_id FOR UPDATE"
+                        ),
+                        {"task_id": task_id},
+                    )
+                )
+                .mappings()
+                .one_or_none()
+            )
+            if task is None:
+                raise RepositoryNotFound("task does not exist")
+
+            current_attempt = int(task["current_attempt"])
+            current_status = TaskStatus(str(task["status"]))
+            attempt = (
+                (
+                    await session.execute(
+                        text(
+                            "SELECT created_at, resume_from_step_id FROM attempts "
+                            "WHERE task_id = :task_id AND attempt = :attempt"
+                        ),
+                        {"task_id": task_id, "attempt": current_attempt},
+                    )
+                )
+                .mappings()
+                .one()
+            )
+            resume_from_step_id = attempt["resume_from_step_id"]
+            if current_status is not TaskStatus.FAILED:
+                if (
+                    current_attempt >= 2
+                    and resume_from_step_id is not None
+                    and current_status is not TaskStatus.COMPLETED
+                ):
+                    return RetryAttemptResult(
+                        response=RetryAcceptedResponse(
+                            task_id=task_id,
+                            attempt=current_attempt,
+                            status=TaskStatus.PENDING,
+                            accepted_at=attempt["created_at"],
+                        ),
+                        event=None,
+                        created=False,
+                    )
+                raise RepositoryConflict("only failed tasks can be retried")
+
+            failed_step_id = await session.scalar(
+                text(
+                    "SELECT step_id FROM events WHERE task_id = :task_id "
+                    "AND attempt = :attempt AND status = 'FAILED' "
+                    "ORDER BY sequence DESC LIMIT 1"
+                ),
+                {"task_id": task_id, "attempt": current_attempt},
+            )
+            if failed_step_id is None:
+                raise RepositoryConflict("failed task has no durable failure checkpoint")
+
+            next_attempt = current_attempt + 1
+            await session.execute(
+                text(
+                    "INSERT INTO attempts "
+                    "(task_id, attempt, status, resume_from_step_id, created_at) "
+                    "VALUES (:task_id, :attempt, 'PENDING', :resume_from_step_id, :accepted_at)"
+                ),
+                {
+                    "task_id": task_id,
+                    "attempt": next_attempt,
+                    "resume_from_step_id": str(failed_step_id),
+                    "accepted_at": accepted_at,
+                },
+            )
+            await session.execute(
+                text(
+                    "UPDATE tasks SET status = 'PENDING', progress = 0, "
+                    "current_attempt = :attempt, last_error = NULL, updated_at = :accepted_at "
+                    "WHERE task_id = :task_id"
+                ),
+                {
+                    "task_id": task_id,
+                    "attempt": next_attempt,
+                    "accepted_at": accepted_at,
+                },
+            )
+            event_row = (
+                (
+                    await session.execute(
+                        text(
+                            "INSERT INTO events "
+                            "(task_id, attempt, step_id, correlation_id, agent, status, "
+                            "progress, message, elapsed_ms, occurred_at) "
+                            "VALUES (:task_id, :attempt, :step_id, :correlation_id, 'master', "
+                            "'PENDING', 0, :message, 0, :accepted_at) RETURNING *"
+                        ),
+                        {
+                            "task_id": task_id,
+                            "attempt": next_attempt,
+                            "step_id": str(failed_step_id),
+                            "correlation_id": task["correlation_id"],
+                            "message": "已接受失败任务重试",
+                            "accepted_at": accepted_at,
+                        },
+                    )
+                )
+                .mappings()
+                .one()
+            )
+            event = _event_from_row(event_row, ())
+            return RetryAttemptResult(
+                response=RetryAcceptedResponse(
+                    task_id=task_id,
+                    attempt=next_attempt,
+                    status=TaskStatus.PENDING,
+                    accepted_at=accepted_at,
+                ),
+                event=event,
+                created=True,
+            )
 
     async def save_plan(
         self,

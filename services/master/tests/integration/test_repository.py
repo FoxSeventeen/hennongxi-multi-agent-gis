@@ -5,7 +5,7 @@ import json
 import os
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import httpx
 import pytest
@@ -18,6 +18,7 @@ from hennongxi_contracts import (
     CreateTaskRequest,
     DataAssetRef,
     DataPrepareResult,
+    ErrorCode,
     ExecutionPlan,
     LogicalDatasetId,
     ModelCallRecord,
@@ -26,6 +27,7 @@ from hennongxi_contracts import (
     PlanStep,
     PlanStepKind,
     StepStatus,
+    StructuredError,
     TaskStatus,
 )
 from hennongxi_contracts.state import InvalidTaskTransition
@@ -35,6 +37,7 @@ from hennongxi_master.repository import (
     ArtifactCreate,
     ProgressCreate,
     RepositoryConflict,
+    RepositoryNotFound,
     TaskRepository,
     TransitionCreate,
     WatershedCreate,
@@ -639,6 +642,111 @@ async def test_database_constraints_reject_invalid_and_orphaned_workflow_rows(
             "occurred_at": NOW,
         },
     )
+
+
+@pytest.mark.asyncio
+async def test_failed_task_retry_is_atomic_and_concurrent_requests_share_one_attempt(
+    repository: TaskRepository,
+    engine: AsyncEngine,
+) -> None:
+    await create_pending_task(repository)
+    await repository.transition_task(
+        TransitionCreate(
+            task_id=TASK_ID,
+            attempt=1,
+            step_id="planning",
+            agent=AgentName.MASTER,
+            target_status=TaskStatus.PLANNING,
+            progress=5,
+            message="正在生成计划",
+            elapsed_ms=1,
+            occurred_at=NOW,
+        )
+    )
+    await repository.save_plan(plan(), attempt=1)
+    await repository.transition_task(
+        TransitionCreate(
+            task_id=TASK_ID,
+            attempt=1,
+            step_id="prepare_data",
+            agent=AgentName.DATA,
+            target_status=TaskStatus.DATA_PREPARING,
+            progress=10,
+            message="开始准备数据",
+            elapsed_ms=1,
+            occurred_at=NOW + timedelta(seconds=1),
+            step_status=StepStatus.RUNNING,
+            step_progress=0,
+            step_started_at=NOW + timedelta(seconds=1),
+        )
+    )
+    failure = StructuredError(
+        code=ErrorCode.ANALYSIS_FAILED,
+        message="分析服务暂时失败",
+        retryable=True,
+    )
+    await repository.transition_task(
+        TransitionCreate(
+            task_id=TASK_ID,
+            attempt=1,
+            step_id="analyze_ndvi_change",
+            agent=AgentName.ANALYSIS,
+            target_status=TaskStatus.FAILED,
+            progress=30,
+            message="分析失败",
+            elapsed_ms=2,
+            occurred_at=NOW + timedelta(seconds=2),
+            error=failure,
+        )
+    )
+
+    competitor = TaskRepository(engine)
+    accepted_at = NOW + timedelta(seconds=3)
+    first, duplicate = await asyncio.gather(
+        repository.retry_failed_task(TASK_ID, accepted_at=accepted_at),
+        competitor.retry_failed_task(TASK_ID, accepted_at=accepted_at),
+    )
+
+    assert first.response == duplicate.response
+    assert first.response.attempt == 2
+    assert first.response.status is TaskStatus.PENDING
+    assert {first.created, duplicate.created} == {False, True}
+    task = await repository.get_task(TASK_ID)
+    events = await repository.list_events(TASK_ID)
+    assert task is not None
+    assert task.current_attempt == 2
+    assert task.status is TaskStatus.PENDING
+    assert task.progress == 0
+    assert task.last_error is None
+    assert [event.attempt for event in events] == [1, 1, 1, 2]
+    assert events[-1].step_id == "analyze_ndvi_change"
+    assert events[-1].message == "已接受失败任务重试"
+
+    async with engine.connect() as connection:
+        attempts = (
+            (
+                await connection.execute(
+                    text(
+                        "SELECT attempt, status, resume_from_step_id FROM attempts "
+                        "WHERE task_id = :task_id ORDER BY attempt"
+                    ),
+                    {"task_id": TASK_ID},
+                )
+            )
+            .tuples()
+            .all()
+        )
+    assert attempts == [(1, "FAILED", None), (2, "PENDING", "analyze_ndvi_change")]
+
+
+@pytest.mark.asyncio
+async def test_retry_rejects_missing_and_nonfailed_tasks(repository: TaskRepository) -> None:
+    with pytest.raises(RepositoryNotFound):
+        await repository.retry_failed_task(uuid4(), accepted_at=NOW)
+
+    await create_pending_task(repository)
+    with pytest.raises(RepositoryConflict, match="only failed"):
+        await repository.retry_failed_task(TASK_ID, accepted_at=NOW)
 
 
 @pytest.mark.asyncio
