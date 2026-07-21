@@ -63,6 +63,7 @@ describe("readiness application shell", () => {
     expect(screen.getByText("主控 Agent")).toBeVisible();
     expect(screen.getByText("分析 Agent")).toBeVisible();
     expect(screen.getAllByText("正常")).toHaveLength(2);
+    expect(screen.getByText("04")).toHaveClass("panel-index");
   });
 
   it("explains configuration blockers in Chinese", async () => {
