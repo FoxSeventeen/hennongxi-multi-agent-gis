@@ -19,8 +19,13 @@ from hennongxi_contracts import (
     TaskStatus,
 )
 from hennongxi_master.agent_client import AgentClientConfig, AgentHttpClient
-from hennongxi_master.orchestrator import TaskOrchestrator
+from hennongxi_master.orchestrator import StudyAreaGrounding, TaskOrchestrator
 from hennongxi_master.repository import TaskRepository, WatershedCreate
+from hennongxi_master.study_area import (
+    StudyAreaConclusion,
+    StudyAreaEvidence,
+    StudyAreaReasonCode,
+)
 from hennongxi_master.worker import OrchestrationWorker, RecoveryTaskPlanner, WorkerConfig
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
@@ -73,7 +78,7 @@ async def _create_task(repository: TaskRepository) -> tuple[UUID, UUID]:
     now = datetime.now(UTC)
     task_id = uuid4()
     correlation_id = uuid4()
-    await repository.create_watershed(
+    await repository.ensure_watershed(
         WatershedCreate(
             watershed_id=WATERSHED_ID,
             slug="shennongxi",
@@ -113,11 +118,13 @@ def _agent_config() -> AgentClientConfig:
 def _worker(
     repository: TaskRepository,
     client: httpx.AsyncClient,
+    study_area_grounder: StudyAreaGrounding | None = None,
 ) -> OrchestrationWorker:
     orchestrator = TaskOrchestrator(
         repository,
         AgentHttpClient(_agent_config(), client),
         RecoveryTaskPlanner(None),
+        study_area_grounder=study_area_grounder,
     )
     return OrchestrationWorker(
         repository,
@@ -128,6 +135,29 @@ def _worker(
             lease_seconds=120,
             heartbeat_interval_seconds=30,
         ),
+    )
+
+
+class _Grounder:
+    def __init__(self, evidence: StudyAreaEvidence) -> None:
+        self.evidence = evidence
+
+    async def verify_query(self, query: str) -> StudyAreaEvidence:
+        assert "神农溪" in query
+        return self.evidence
+
+
+def _grounding_evidence(
+    conclusion: StudyAreaConclusion,
+    reason_code: StudyAreaReasonCode,
+    duration_ms: int,
+) -> StudyAreaEvidence:
+    return StudyAreaEvidence(
+        conclusion=conclusion,
+        checked_at=datetime.now(UTC),
+        duration_ms=duration_ms,
+        reason_code=reason_code,
+        retryable=reason_code is StudyAreaReasonCode.ONLINE_RATE_LIMITED,
     )
 
 
@@ -189,6 +219,92 @@ async def test_worker_runs_complete_agent_chain_over_private_http(
         AgentName.QUALITY,
         AgentName.PUBLISHER,
     }
+
+
+@pytest.mark.asyncio
+async def test_verified_and_degraded_grounding_keep_fixed_agent_results_identical(
+    engine: AsyncEngine,
+) -> None:
+    repository = TaskRepository(engine)
+    timeout = httpx.Timeout(connect=5, read=300, write=10, pool=5)
+
+    async with httpx.AsyncClient(
+        timeout=timeout,
+        limits=httpx.Limits(max_connections=5, max_keepalive_connections=5),
+        follow_redirects=False,
+        trust_env=False,
+    ) as client:
+        verified_task_id, _ = await _create_task(repository)
+        verified_grounder = _Grounder(
+            _grounding_evidence(
+                StudyAreaConclusion.VERIFIED,
+                StudyAreaReasonCode.ONLINE_MATCH_CONFIRMED,
+                17,
+            )
+        )
+        assert await _worker(repository, client, verified_grounder).run_once() is True
+
+        degraded_task_id, _ = await _create_task(repository)
+        degraded_grounder = _Grounder(
+            _grounding_evidence(
+                StudyAreaConclusion.DEGRADED,
+                StudyAreaReasonCode.ONLINE_RATE_LIMITED,
+                33,
+            )
+        )
+        assert await _worker(repository, client, degraded_grounder).run_once() is True
+
+    verified = await repository.get_task(verified_task_id)
+    degraded = await repository.get_task(degraded_task_id)
+    assert verified is not None and degraded is not None
+    assert verified.status is degraded.status is TaskStatus.COMPLETED
+    assert verified.analysis is not None and degraded.analysis is not None
+    assert verified.quality is not None and degraded.quality is not None
+    assert verified.analysis.statistics == degraded.analysis.statistics
+    assert verified.quality.metrics.model_dump(
+        exclude={"elapsed_ms", "evidence"}
+    ) == degraded.quality.metrics.model_dump(exclude={"elapsed_ms", "evidence"})
+    assert verified.quality.metrics.evidence[:3] == degraded.quality.metrics.evidence[:3]
+
+    analysis_types = {
+        ArtifactType.NDVI_BEFORE,
+        ArtifactType.NDVI_AFTER,
+        ArtifactType.NDVI_DIFFERENCE,
+        ArtifactType.CHANGE_CLASSIFICATION,
+    }
+    verified_outputs = {
+        artifact.artifact_type: (artifact.checksum_sha256, artifact.byte_size)
+        for artifact in verified.artifacts
+        if artifact.artifact_type in analysis_types
+    }
+    degraded_outputs = {
+        artifact.artifact_type: (artifact.checksum_sha256, artifact.byte_size)
+        for artifact in degraded.artifacts
+        if artifact.artifact_type in analysis_types
+    }
+    assert verified_outputs == degraded_outputs
+
+    verified_events = await repository.list_events(verified_task_id)
+    degraded_events = await repository.list_events(degraded_task_id)
+    assert verified_events[0].message.startswith(
+        "在线位置校验通过（VERIFIED/ONLINE_MATCH_CONFIRMED）"
+    )
+    assert degraded_events[0].message.startswith(
+        "在线位置校验已降级（DEGRADED/ONLINE_RATE_LIMITED）"
+    )
+    assert verified_events[0].elapsed_ms == 17
+    assert degraded_events[0].elapsed_ms == 33
+
+    assert DATABASE_URL is not None
+    restarted_repository = TaskRepository.from_url(DATABASE_URL)
+    try:
+        reconstructed = await restarted_repository.get_task(verified_task_id)
+        reconstructed_events = await restarted_repository.list_events(verified_task_id)
+    finally:
+        await restarted_repository.dispose()
+
+    assert reconstructed == verified
+    assert reconstructed_events == verified_events
 
 
 @pytest.mark.parametrize(

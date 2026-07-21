@@ -524,7 +524,7 @@ async def test_verified_study_area_is_persisted_before_planning_without_changing
     planning_event = repository.records[0]
     assert planning_event.target_status is TaskStatus.PLANNING
     assert planning_event.message == (
-        "在线位置校验通过（ONLINE_MATCH_CONFIRMED）；正在生成受约束的执行计划"
+        "在线位置校验通过（VERIFIED/ONLINE_MATCH_CONFIRMED）；正在生成受约束的执行计划"
     )
     assert planning_event.occurred_at == NOW
     assert planning_event.elapsed_ms == 12
@@ -559,7 +559,8 @@ async def test_degraded_location_evidence_is_refreshed_for_recovered_retry() -> 
     assert grounder.queries == [repository.task.query]
     planning_event = repository.records[0]
     assert planning_event.message == (
-        "在线位置校验已降级（ONLINE_CHECK_UNAVAILABLE）；使用 G2 本地权威数据恢复已验证的执行计划"
+        "在线位置校验已降级（DEGRADED/ONLINE_CHECK_UNAVAILABLE）；"
+        "使用 G2 本地权威数据恢复已验证的执行计划"
     )
     assert planning_event.elapsed_ms == 25
 
@@ -595,8 +596,38 @@ async def test_legacy_out_of_scope_task_is_rejected_before_planning() -> None:
     rejected_event = repository.records[0]
     assert rejected_event.target_status is TaskStatus.FAILED
     assert rejected_event.message == (
-        "研究区校验已拒绝（OUT_OF_SCOPE_STUDY_AREA）：目前仅支持神农溪流域生态变化监测"
+        "研究区校验已拒绝（REJECTED/OUT_OF_SCOPE_STUDY_AREA）：目前仅支持神农溪流域生态变化监测"
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("query", "reason_code"),
+    [
+        ("分析神农溪流域变化", StudyAreaReasonCode.ONLINE_CHECK_NOT_CONFIGURED),
+        ("分析植被变化", StudyAreaReasonCode.LOCAL_STUDY_AREA_AMBIGUOUS),
+    ],
+)
+async def test_unverified_queries_emit_only_explicit_degraded_planning_evidence(
+    query: str,
+    reason_code: StudyAreaReasonCode,
+) -> None:
+    repository = _Repository()
+    repository.task = repository.task.model_copy(update={"query": query})
+
+    await TaskOrchestrator(
+        repository,
+        _Agents(fail_at=AgentName.DATA),
+        _Planner(),
+        now=lambda: NOW,
+    ).run(TASK_ID, attempt=1)
+
+    planning_event = repository.records[0]
+    assert planning_event.message == (
+        f"在线位置校验已降级（DEGRADED/{reason_code.value}）；"
+        "使用 G2 本地权威数据继续生成受约束的执行计划"
+    )
+    assert "VERIFIED" not in planning_event.message
 
 
 @pytest.mark.asyncio

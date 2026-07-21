@@ -193,7 +193,8 @@ class TaskOrchestrator:
                     target_status=TaskStatus.FAILED,
                     progress=0,
                     message=(
-                        f"研究区校验已拒绝（{study_area.reason_code.value}）：{error.message}"
+                        f"研究区校验已拒绝（{study_area.conclusion.value}/"
+                        f"{study_area.reason_code.value}）：{error.message}"
                     ),
                     elapsed_ms=study_area.duration_ms,
                     occurred_at=study_area.checked_at,
@@ -913,11 +914,16 @@ def _utc_now() -> datetime:
 
 
 def _planning_message(evidence: StudyAreaEvidence, *, recovering: bool) -> str:
-    planning_action = "恢复已验证的执行计划" if recovering else "正在生成受约束的执行计划"
     if evidence.conclusion is StudyAreaConclusion.VERIFIED:
-        return f"在线位置校验通过（{evidence.reason_code.value}）；{planning_action}"
+        planning_action = "恢复已验证的执行计划" if recovering else "正在生成受约束的执行计划"
+        return (
+            f"在线位置校验通过（{evidence.conclusion.value}/"
+            f"{evidence.reason_code.value}）；{planning_action}"
+        )
+    planning_action = "恢复已验证的执行计划" if recovering else "继续生成受约束的执行计划"
     return (
-        f"在线位置校验已降级（{evidence.reason_code.value}）；使用 G2 本地权威数据{planning_action}"
+        f"在线位置校验已降级（{evidence.conclusion.value}/"
+        f"{evidence.reason_code.value}）；使用 G2 本地权威数据{planning_action}"
     )
 
 
