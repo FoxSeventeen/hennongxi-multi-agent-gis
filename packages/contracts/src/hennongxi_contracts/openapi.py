@@ -137,7 +137,7 @@ def create_contract_app() -> FastAPI:
         tags=["Master public"],
         status_code=202,
         response_model=RetryAcceptedResponse,
-        responses=_errors(404, 409, 422),
+        responses=_errors(404, 409, 422, 503),
     )
     def retry_task(task_id: Annotated[UUID, Path()]) -> RetryAcceptedResponse:
         """Create an immutable new attempt from a validated safe checkpoint."""

@@ -8,10 +8,23 @@ from uuid import UUID
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from hennongxi_contracts import CreateTaskRequest, ErrorResponse, TaskResponse, TaskStatus
+from hennongxi_contracts import (
+    AgentName,
+    CreateTaskRequest,
+    ErrorResponse,
+    RetryAcceptedResponse,
+    TaskEvent,
+    TaskResponse,
+    TaskStatus,
+)
 from hennongxi_contracts.openapi import create_contract_app
 from hennongxi_master.main import app
-from hennongxi_master.repository import WatershedCreate
+from hennongxi_master.repository import (
+    RepositoryConflict,
+    RepositoryNotFound,
+    RetryAttemptResult,
+    WatershedCreate,
+)
 from hennongxi_observability import CORRELATION_ID_HEADER
 
 WATERSHED_ID = UUID("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
@@ -26,6 +39,8 @@ class StubTaskRepository:
     create_calls: list[dict[str, Any]] = field(default_factory=list)
     failure: Exception | None = None
     provisioning_failure: Exception | None = None
+    retry_result: RetryAttemptResult | None = None
+    retry_failure: Exception | None = None
 
     async def get_watershed_id_by_slug(self, slug: str) -> UUID | None:
         assert slug == "shennongxi"
@@ -57,6 +72,29 @@ class StubTaskRepository:
         if self.failure is not None:
             raise self.failure
         return self.tasks.get(task_id)
+
+    async def retry_failed_task(
+        self,
+        task_id: UUID,
+        *,
+        accepted_at: datetime,
+    ) -> RetryAttemptResult:
+        if self.retry_failure is not None:
+            raise self.retry_failure
+        assert task_id == TASK_ID
+        assert accepted_at.tzinfo is not None
+        if self.retry_result is None:
+            raise AssertionError("retry result was not configured")
+        return self.retry_result
+
+
+@dataclass
+class StubEventPublisher:
+    events: list[TaskEvent] = field(default_factory=list)
+
+    async def publish(self, event: TaskEvent) -> bool:
+        self.events.append(event)
+        return True
 
 
 @pytest.fixture
@@ -191,6 +229,72 @@ def test_missing_and_invalid_task_ids_return_shared_errors(
     assert ErrorResponse.model_validate(invalid.json()).error.code.value == "VALIDATION_ERROR"
 
 
+def test_failed_task_retry_returns_the_atomic_attempt_and_publishes_its_event(
+    master_app: FastAPI,
+    repository: StubTaskRepository,
+) -> None:
+    accepted_at = datetime(2026, 7, 21, 4, 0, tzinfo=UTC)
+    event = TaskEvent(
+        sequence=5,
+        task_id=TASK_ID,
+        step_id="analyze_ndvi_change",
+        attempt=2,
+        correlation_id=CORRELATION_ID,
+        agent=AgentName.MASTER,
+        status=TaskStatus.PENDING,
+        progress=0,
+        message="已接受失败任务重试",
+        elapsed_ms=0,
+        occurred_at=accepted_at,
+    )
+    repository.retry_result = RetryAttemptResult(
+        response=RetryAcceptedResponse(
+            task_id=TASK_ID,
+            attempt=2,
+            status=TaskStatus.PENDING,
+            accepted_at=accepted_at,
+        ),
+        event=event,
+        created=True,
+    )
+    publisher = StubEventPublisher()
+
+    with TestClient(master_app) as client:
+        master_app.state.task_repository = repository
+        master_app.state.event_store = publisher
+        response = client.post(f"/api/v1/tasks/{TASK_ID}/retry")
+
+    assert response.status_code == 202
+    assert RetryAcceptedResponse.model_validate(response.json()) == repository.retry_result.response
+    assert publisher.events == [event]
+
+
+@pytest.mark.parametrize(
+    ("failure", "status_code", "error_code"),
+    [
+        (RepositoryNotFound("missing"), 404, "TASK_NOT_FOUND"),
+        (RepositoryConflict("not failed"), 409, "CONFLICT"),
+        (RuntimeError("postgresql://private:secret@host/db"), 503, "DEPENDENCY_UNAVAILABLE"),
+    ],
+)
+def test_retry_rejections_are_structured_and_never_expose_repository_details(
+    master_app: FastAPI,
+    repository: StubTaskRepository,
+    failure: Exception,
+    status_code: int,
+    error_code: str,
+) -> None:
+    repository.retry_failure = failure
+
+    with TestClient(master_app) as client:
+        master_app.state.task_repository = repository
+        response = client.post(f"/api/v1/tasks/{TASK_ID}/retry")
+
+    assert response.status_code == status_code
+    assert ErrorResponse.model_validate(response.json()).error.code.value == error_code
+    assert "private:secret" not in response.text
+
+
 def test_runtime_task_routes_match_the_shared_openapi_shapes() -> None:
     runtime_paths = app.openapi()["paths"]
     contract_paths = create_contract_app().openapi()["paths"]
@@ -198,6 +302,7 @@ def test_runtime_task_routes_match_the_shared_openapi_shapes() -> None:
     for path, method in (
         ("/api/v1/tasks", "post"),
         ("/api/v1/tasks/{task_id}", "get"),
+        ("/api/v1/tasks/{task_id}/retry", "post"),
     ):
         runtime = runtime_paths[path][method]
         contract = contract_paths[path][method]
