@@ -10,7 +10,12 @@ from uuid import UUID
 import pytest
 import pytest_asyncio
 from hennongxi_contracts import AgentName, CreateTaskRequest, TaskEvent, TaskStatus
-from hennongxi_master.events import EventStore, ReplaySource, task_event_stream_key
+from hennongxi_master.events import (
+    CacheWaitResult,
+    EventStore,
+    ReplaySource,
+    task_event_stream_key,
+)
 from hennongxi_master.repository import TaskRepository, TransitionCreate, WatershedCreate
 from redis.asyncio import Redis
 from sqlalchemy import text
@@ -170,6 +175,14 @@ async def test_append_preserves_order_fields_and_bounded_replay(
     assert complete_replay.events == tuple(result.event for result in results)
     assert resumed_replay.source is ReplaySource.CACHE
     assert resumed_replay.events == tuple(result.event for result in results[1:])
+    assert (
+        await store.wait_for_events(TASK_ID, after_sequence=2, timeout_ms=100)
+        is CacheWaitResult.EVENTS
+    )
+    assert (
+        await store.wait_for_events(TASK_ID, after_sequence=3, timeout_ms=100)
+        is CacheWaitResult.TIMEOUT
+    )
 
 
 @pytest.mark.asyncio
@@ -244,12 +257,14 @@ async def test_redis_unavailability_never_loses_history_or_falsifies_task_state(
             )
         )
         replay = await store.replay(TASK_ID)
+        wait_result = await store.wait_for_events(TASK_ID, after_sequence=0, timeout_ms=100)
         task = await repository.get_task(TASK_ID)
     finally:
         await unavailable.aclose()
 
     assert not appended.cached
     assert replay.source is ReplaySource.DURABLE
+    assert wait_result is CacheWaitResult.UNAVAILABLE
     assert replay.events == (appended.event,)
     assert task is not None
     assert task.status is TaskStatus.PLANNING

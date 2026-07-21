@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import cast
 from uuid import UUID
 
 import structlog
@@ -22,6 +23,12 @@ _LOGGER = structlog.get_logger("hennongxi.master.events")
 class ReplaySource(StrEnum):
     CACHE = "CACHE"
     DURABLE = "DURABLE"
+
+
+class CacheWaitResult(StrEnum):
+    EVENTS = "EVENTS"
+    TIMEOUT = "TIMEOUT"
+    UNAVAILABLE = "UNAVAILABLE"
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,6 +122,55 @@ class EventStore:
         if cached == durable:
             return EventReplay(events=cached, source=ReplaySource.CACHE)
         return EventReplay(events=durable, source=ReplaySource.DURABLE)
+
+    async def wait_for_events(
+        self,
+        task_id: UUID,
+        *,
+        after_sequence: int,
+        timeout_ms: int,
+        limit: int = 100,
+    ) -> CacheWaitResult:
+        """Wait briefly for a cache wake-up; callers must replay durable truth afterward."""
+        if after_sequence < 0:
+            raise ValueError("after_sequence cannot be negative")
+        if not 100 <= timeout_ms <= 60_000:
+            raise ValueError("timeout_ms must be between 100 and 60000")
+        if not 1 <= limit <= MAX_REPLAY_EVENTS:
+            raise ValueError("limit must be between 1 and 1000")
+
+        try:
+            # XREAD returns only IDs greater than the supplied cursor and BLOCK is
+            # bounded so each client can promptly observe cancellation/disconnects.
+            # Source: https://redis.io/docs/latest/commands/xread/
+            response = await self._redis.xread(
+                {task_event_stream_key(task_id): f"{after_sequence}-0"},
+                count=limit,
+                block=timeout_ms,
+            )
+        except (RedisError, ValueError):
+            return CacheWaitResult.UNAVAILABLE
+        if not response:
+            return CacheWaitResult.TIMEOUT
+
+        streams = cast(
+            list[
+                tuple[
+                    object,
+                    list[tuple[object, Mapping[bytes | str, bytes | str]]],
+                ]
+            ],
+            response,
+        )
+        try:
+            for _stream_key, rows in streams:
+                for row_id, fields in rows:
+                    event = _decode_stream_event(row_id, fields)
+                    if event.task_id != task_id or event.sequence <= after_sequence:
+                        raise ValueError("Redis wake-up event does not match the requested cursor")
+        except (TypeError, ValueError):
+            return CacheWaitResult.UNAVAILABLE
+        return CacheWaitResult.EVENTS
 
     async def _read_cached(
         self,
