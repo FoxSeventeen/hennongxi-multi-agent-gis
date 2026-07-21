@@ -1,12 +1,19 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
+from typing import Any
 
+import httpx
 import pytest
 from hennongxi_master.amap import (
     AMAP_ORIGIN,
+    AMAP_PLACE_PATH,
+    CANONICAL_STUDY_AREA_ADCODE,
+    CANONICAL_STUDY_AREA_NAME,
     AmapConfig,
     AmapConfigurationError,
+    AmapStudyAreaVerifier,
     AmapVerification,
     AmapVerificationCode,
 )
@@ -14,6 +21,42 @@ from pydantic import ValidationError
 
 FAKE_AMAP_KEY = "test-amap-key-private-value"
 CHECKED_AT = datetime(2026, 7, 21, 12, 0, tzinfo=UTC)
+
+
+def amap_config() -> AmapConfig:
+    return AmapConfig.from_environment(
+        {
+            "AMAP_WEB_SERVICE_KEY": FAKE_AMAP_KEY,
+            "AMAP_TIMEOUT_SECONDS": "4.5",
+        }
+    )
+
+
+def amap_response(pois: list[dict[str, object]]) -> bytes:
+    return json.dumps(
+        {
+            "status": "1",
+            "info": "OK",
+            "infocode": "10000",
+            "count": str(len(pois)),
+            "pois": pois,
+            "private_provider_extension": "must-not-be-retained",
+        },
+        ensure_ascii=False,
+    ).encode()
+
+
+def canonical_poi(**overrides: object) -> dict[str, object]:
+    poi: dict[str, object] = {
+        "id": "private-amap-poi-id",
+        "name": CANONICAL_STUDY_AREA_NAME,
+        "adcode": CANONICAL_STUDY_AREA_ADCODE,
+        "typecode": "110202",
+        "location": "110.123456,31.123456",
+        "address": "private-amap-address",
+    }
+    poi.update(overrides)
+    return poi
 
 
 def test_amap_config_loads_only_key_and_bounded_timeout_without_exposing_secret() -> None:
@@ -121,3 +164,90 @@ def test_amap_verification_rejects_inconsistent_evidence(
             retryable=retryable,
             match_count=match_count,
         )
+
+
+@pytest.mark.asyncio
+async def test_amap_verifier_uses_only_fixed_canonical_search_and_returns_minimal_evidence() -> (
+    None
+):
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["request"] = request
+        return httpx.Response(200, content=amap_response([canonical_poi()]))
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await AmapStudyAreaVerifier(amap_config(), client).verify()
+
+    request = captured["request"]
+    assert isinstance(request, httpx.Request)
+    assert request.method == "GET"
+    assert request.url.scheme == "https"
+    assert request.url.host == "restapi.amap.com"
+    assert request.url.path == AMAP_PLACE_PATH
+    assert dict(request.url.params) == {
+        "key": FAKE_AMAP_KEY,
+        "keywords": CANONICAL_STUDY_AREA_NAME,
+        "types": "110000",
+        "city": CANONICAL_STUDY_AREA_ADCODE,
+        "citylimit": "true",
+        "offset": "10",
+        "page": "1",
+        "extensions": "all",
+        "output": "JSON",
+    }
+    assert result.code is AmapVerificationCode.VERIFIED
+    assert result.match_count == 1
+    assert result.retryable is False
+    assert result.checked_at.tzinfo is UTC
+    assert result.duration_ms >= 0
+
+    serialized = result.model_dump_json()
+    assert FAKE_AMAP_KEY not in serialized
+    assert "private-amap-poi-id" not in serialized
+    assert "private-amap-address" not in serialized
+    assert "110.123456" not in serialized
+    assert "must-not-be-retained" not in serialized
+
+
+@pytest.mark.parametrize(
+    ("pois", "expected_code", "expected_match_count"),
+    [
+        ([], AmapVerificationCode.NO_MATCH, 0),
+        (
+            [canonical_poi(name="神农溪风景区")],
+            AmapVerificationCode.NO_MATCH,
+            0,
+        ),
+        (
+            [canonical_poi(adcode="422822")],
+            AmapVerificationCode.NO_MATCH,
+            0,
+        ),
+        (
+            [canonical_poi(typecode="060101")],
+            AmapVerificationCode.NO_MATCH,
+            0,
+        ),
+        (
+            [canonical_poi(), canonical_poi(id="second-private-id")],
+            AmapVerificationCode.AMBIGUOUS,
+            2,
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_amap_verifier_counts_only_exact_canonical_scenic_matches(
+    pois: list[dict[str, object]],
+    expected_code: AmapVerificationCode,
+    expected_match_count: int,
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=amap_response(pois))
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await AmapStudyAreaVerifier(amap_config(), client).verify()
+
+    assert result.code is expected_code
+    assert result.match_count == expected_match_count
+    assert result.retryable is False
