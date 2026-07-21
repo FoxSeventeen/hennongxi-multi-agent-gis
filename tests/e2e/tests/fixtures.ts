@@ -29,9 +29,13 @@ export const test = base.extend<Diagnostics>({
 
     await use(browserMessages);
 
-    if (browserMessages.length > 0) {
+    if (browserMessages.length > 0 || testInfo.status !== testInfo.expectedStatus) {
+      const diagnosticMessages =
+        browserMessages.length > 0
+          ? browserMessages.join("\n")
+          : "未捕获到浏览器控制台错误或警告。";
       await testInfo.attach("browser-console.log", {
-        body: Buffer.from(`${browserMessages.join("\n")}\n`, "utf8"),
+        body: Buffer.from(`${diagnosticMessages}\n`, "utf8"),
         contentType: "text/plain",
       });
     }

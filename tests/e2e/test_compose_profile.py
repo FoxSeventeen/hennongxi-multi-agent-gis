@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from typing import Any, cast
 
@@ -5,6 +6,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 E2E_COMPOSE_PATH = ROOT / "tests/e2e/compose.yml"
+E2E_RUNNER_PATH = ROOT / "tests/e2e/run.sh"
 
 
 class ComposeLoader(yaml.SafeLoader):
@@ -66,3 +68,14 @@ def test_all_data_consumers_wait_for_the_seeded_approved_manifest() -> None:
         service = services[service_name]
         assert service["environment"]["DATA_MANIFEST_PATH"] == "/e2e/data/manifest.json"
         assert service["depends_on"]["e2e-seed"] == {"condition": "service_completed_successfully"}
+
+
+def test_e2e_runner_rebuilds_waits_runs_and_preserves_failure_logs() -> None:
+    runner = E2E_RUNNER_PATH.read_text(encoding="utf-8")
+
+    assert os.access(E2E_RUNNER_PATH, os.X_OK)
+    assert "docker compose" in runner
+    assert "build master-agent web postgis e2e" in runner
+    assert "up -d --wait --remove-orphans" in runner
+    assert "run --rm e2e" in runner
+    assert "test-results/compose.log" in runner
