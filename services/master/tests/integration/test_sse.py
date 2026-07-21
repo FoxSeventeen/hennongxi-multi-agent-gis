@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
@@ -72,10 +73,7 @@ async def redis_client() -> AsyncIterator[Redis]:
         await value.aclose()
 
 
-async def _create_terminal_task(
-    repository: TaskRepository,
-    redis_client: Redis,
-) -> tuple[TaskEvent, TaskEvent]:
+async def _create_pending_task(repository: TaskRepository) -> None:
     await repository.create_watershed(
         WatershedCreate(
             watershed_id=WATERSHED_ID,
@@ -104,6 +102,13 @@ async def _create_terminal_task(
         request=CreateTaskRequest(query="分析神农溪植被变化"),
         created_at=NOW,
     )
+
+
+async def _create_terminal_task(
+    repository: TaskRepository,
+    redis_client: Redis,
+) -> tuple[TaskEvent, TaskEvent]:
+    await _create_pending_task(repository)
     store = EventStore(repository, redis_client)
     planning = await store.append(
         TransitionCreate(
@@ -172,7 +177,10 @@ async def test_endpoint_replays_resumes_and_matches_polling_terminal_state(
     planning, failure = await _create_terminal_task(repository, redis_client)
 
     with _master() as client:
-        streamed = client.get(f"/api/v1/tasks/{TASK_ID}/events")
+        streamed = client.get(
+            f"/api/v1/tasks/{TASK_ID}/events",
+            headers={"Origin": "http://127.0.0.1:3000"},
+        )
         resumed = client.get(
             f"/api/v1/tasks/{TASK_ID}/events",
             headers={"Last-Event-ID": str(planning.sequence)},
@@ -182,10 +190,19 @@ async def test_endpoint_replays_resumes_and_matches_polling_terminal_state(
             headers={"Last-Event-ID": str(failure.sequence)},
         )
         queried = client.get(f"/api/v1/tasks/{TASK_ID}")
+        preflight = client.options(
+            f"/api/v1/tasks/{TASK_ID}/events",
+            headers={
+                "Origin": "http://127.0.0.1:3000",
+                "Access-Control-Request-Method": "GET",
+                "Access-Control-Request-Headers": "Last-Event-ID",
+            },
+        )
 
     assert streamed.status_code == 200
     assert streamed.headers["content-type"].startswith("text/event-stream")
     assert streamed.headers["cache-control"] == "no-cache, no-transform"
+    assert streamed.headers["access-control-allow-origin"] == "http://127.0.0.1:3000"
     assert _events_from_response(streamed.text) == (planning, failure)
     assert _events_from_response(resumed.text) == (failure,)
     assert exhausted.text == ""
@@ -194,6 +211,8 @@ async def test_endpoint_replays_resumes_and_matches_polling_terminal_state(
     assert task.status is failure.status is TaskStatus.FAILED
     assert task.progress == failure.progress
     assert task.last_error == failure.error
+    assert preflight.status_code == 200
+    assert "last-event-id" in preflight.headers["access-control-allow-headers"].lower()
 
 
 async def test_endpoint_replays_durable_history_after_redis_loss(
@@ -234,6 +253,58 @@ async def test_endpoint_rejects_invalid_cursor_and_missing_task(
 class _Connected:
     async def is_disconnected(self) -> bool:
         return False
+
+
+async def test_connected_subscriber_receives_new_redis_events_in_durable_order(
+    engine: AsyncEngine,
+    redis_client: Redis,
+) -> None:
+    repository = TaskRepository(engine)
+    await _create_pending_task(repository)
+    store = EventStore(repository, redis_client)
+    streamer = TaskEventStreamer(store)
+
+    async def consume() -> tuple[TaskEvent, ...]:
+        frames = b"".join(
+            [frame async for frame in streamer.stream(TASK_ID, _Connected())]
+        ).decode()
+        return _events_from_response(frames)
+
+    subscriber = asyncio.create_task(consume())
+    await asyncio.sleep(0.05)
+    planning = await store.append(
+        TransitionCreate(
+            task_id=TASK_ID,
+            attempt=1,
+            step_id="planning",
+            agent=AgentName.MASTER,
+            target_status=TaskStatus.PLANNING,
+            progress=5,
+            message="正在生成执行计划",
+            elapsed_ms=10,
+            occurred_at=NOW + timedelta(seconds=1),
+        )
+    )
+    failure = await store.append(
+        TransitionCreate(
+            task_id=TASK_ID,
+            attempt=1,
+            step_id="planning",
+            agent=AgentName.MASTER,
+            target_status=TaskStatus.FAILED,
+            progress=5,
+            message="执行计划生成失败",
+            elapsed_ms=20,
+            occurred_at=NOW + timedelta(seconds=2),
+            error=StructuredError(
+                code=ErrorCode.INTERNAL_ERROR,
+                message="执行计划生成失败",
+                retryable=True,
+            ),
+        )
+    )
+
+    assert await asyncio.wait_for(subscriber, timeout=2) == (planning.event, failure.event)
 
 
 async def test_slow_subscriber_does_not_block_an_independent_subscriber(

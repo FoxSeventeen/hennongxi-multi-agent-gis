@@ -49,6 +49,7 @@ def test_each_agent_exposes_only_its_approved_health_routes(
             "/api/v1/config/readiness",
             "/api/v1/tasks",
             "/api/v1/tasks/{task_id}",
+            "/api/v1/tasks/{task_id}/events",
         }
     if service_name == "data":
         expected_paths.add("/internal/v1/data/prepare")

@@ -8,6 +8,7 @@ from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from hennongxi_contracts import AgentName
 from hennongxi_observability import create_observed_agent_app
 from redis.asyncio import Redis
@@ -74,6 +75,12 @@ def create_master_app(environment: Mapping[str, str] | None = None) -> FastAPI:
         AgentName.MASTER,
         PORT,
         resource_lifespan=_repository_lifespan,
+    )
+    master.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://127.0.0.1:3000", "http://localhost:3000"],
+        allow_methods=["GET", "POST"],
+        allow_headers=["Content-Type", "Last-Event-ID", "X-Correlation-ID"],
     )
     master.state.task_repository_factory = lambda: TaskRepository.from_url(
         values.get("DATABASE_URL", DEFAULT_DATABASE_URL)
