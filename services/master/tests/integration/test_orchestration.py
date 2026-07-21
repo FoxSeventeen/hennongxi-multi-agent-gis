@@ -19,11 +19,13 @@ from hennongxi_contracts import (
     TaskStatus,
 )
 from hennongxi_master.agent_client import AgentClientConfig, AgentHttpClient
+from hennongxi_master.amap import AmapConfig, AmapStudyAreaVerifier
 from hennongxi_master.orchestrator import StudyAreaGrounding, TaskOrchestrator
 from hennongxi_master.repository import TaskRepository, WatershedCreate
 from hennongxi_master.study_area import (
     StudyAreaConclusion,
     StudyAreaEvidence,
+    StudyAreaGrounder,
     StudyAreaReasonCode,
 )
 from hennongxi_master.worker import OrchestrationWorker, RecoveryTaskPlanner, WorkerConfig
@@ -37,6 +39,8 @@ AGENT_URLS = {
     "QUALITY_AGENT_BASE_URL": os.environ.get("QUALITY_AGENT_BASE_URL"),
     "PUBLISHER_AGENT_BASE_URL": os.environ.get("PUBLISHER_AGENT_BASE_URL"),
 }
+RUN_LIVE_AMAP_INTEGRATION = os.environ.get("RUN_LIVE_AMAP_INTEGRATION") == "1"
+AMAP_WEB_SERVICE_KEY_CONFIGURED = bool(os.environ.get("AMAP_WEB_SERVICE_KEY"))
 pytestmark = pytest.mark.skipif(
     DATABASE_URL is None or any(value is None for value in AGENT_URLS.values()),
     reason="PostGIS and all four private Agent URLs are required",
@@ -305,6 +309,45 @@ async def test_verified_and_degraded_grounding_keep_fixed_agent_results_identica
 
     assert reconstructed == verified
     assert reconstructed_events == verified_events
+
+
+@pytest.mark.skipif(
+    not RUN_LIVE_AMAP_INTEGRATION or not AMAP_WEB_SERVICE_KEY_CONFIGURED,
+    reason="explicit live AMap integration is disabled or unconfigured",
+)
+@pytest.mark.asyncio
+async def test_live_amap_grounding_completes_fixed_agent_chain(
+    engine: AsyncEngine,
+) -> None:
+    repository = TaskRepository(engine)
+    task_id, _ = await _create_task(repository)
+    amap_config = AmapConfig.from_environment()
+
+    async with (
+        httpx.AsyncClient(
+            timeout=httpx.Timeout(connect=5, read=300, write=10, pool=5),
+            limits=httpx.Limits(max_connections=5, max_keepalive_connections=5),
+            follow_redirects=False,
+            trust_env=False,
+        ) as agent_client,
+        httpx.AsyncClient(
+            timeout=httpx.Timeout(amap_config.timeout_seconds),
+            limits=httpx.Limits(max_connections=2, max_keepalive_connections=1),
+            follow_redirects=False,
+            trust_env=False,
+        ) as amap_client,
+    ):
+        grounder = StudyAreaGrounder(AmapStudyAreaVerifier(amap_config, amap_client))
+        assert await _worker(repository, agent_client, grounder).run_once() is True
+
+    task = await repository.get_task(task_id)
+    events = await repository.list_events(task_id)
+    assert task is not None and task.status is TaskStatus.COMPLETED
+    assert events[0].message.startswith("在线位置校验通过（VERIFIED/ONLINE_MATCH_CONFIRMED）")
+    assert events[0].elapsed_ms >= 0
+    serialized_events = "".join(event.model_dump_json() for event in events)
+    if amap_config.api_key.get_secret_value() in serialized_events:
+        raise AssertionError("task events contained the configured online credential")
 
 
 @pytest.mark.parametrize(
