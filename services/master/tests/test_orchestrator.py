@@ -37,7 +37,12 @@ from hennongxi_contracts import (
 from hennongxi_master.agent_client import AgentCallError
 from hennongxi_master.orchestrator import PlanningOutcome, TaskOrchestrator
 from hennongxi_master.planning import build_builtin_recovery_plan
-from hennongxi_master.repository import ArtifactCreate, ProgressCreate, TransitionCreate
+from hennongxi_master.repository import (
+    ArtifactCreate,
+    ProgressCreate,
+    RecoverySnapshot,
+    TransitionCreate,
+)
 
 TASK_ID = UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
 OTHER_TASK_ID = UUID("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
@@ -46,16 +51,16 @@ NOW = datetime(2026, 7, 21, 8, 0, tzinfo=UTC)
 SHA256 = "a" * 64
 
 
-def _artifact(artifact_type: ArtifactType) -> ArtifactRef:
+def _artifact(artifact_type: ArtifactType, *, attempt: int = 1) -> ArtifactRef:
     media_type = {
         ArtifactType.AREA_STATISTICS: "application/json",
         ArtifactType.QUALITY_REPORT: "application/json",
         ArtifactType.PDF_REPORT: "application/pdf",
     }.get(artifact_type, "image/tiff; application=geotiff")
     return ArtifactRef(
-        artifact_id=uuid5(TASK_ID, artifact_type.value),
+        artifact_id=uuid5(TASK_ID, f"{attempt}:{artifact_type.value}"),
         task_id=TASK_ID,
-        attempt=1,
+        attempt=attempt,
         artifact_type=artifact_type,
         status=ArtifactStatus.COMPLETE,
         media_type=media_type,
@@ -65,9 +70,9 @@ def _artifact(artifact_type: ArtifactType) -> ArtifactRef:
     )
 
 
-def _analysis_artifacts() -> tuple[ArtifactRef, ...]:
+def _analysis_artifacts(*, attempt: int = 1) -> tuple[ArtifactRef, ...]:
     return tuple(
-        _artifact(artifact_type)
+        _artifact(artifact_type, attempt=attempt)
         for artifact_type in (
             ArtifactType.NDVI_BEFORE,
             ArtifactType.NDVI_AFTER,
@@ -78,14 +83,73 @@ def _analysis_artifacts() -> tuple[ArtifactRef, ...]:
     )
 
 
-def _assets() -> tuple[DataAssetRef, ...]:
+def _assets(*, checksum: str = SHA256) -> tuple[DataAssetRef, ...]:
     return tuple(
         DataAssetRef(
             dataset_id=dataset_id,
-            checksum_sha256=SHA256,
+            checksum_sha256=checksum,
             byte_size=10,
         )
         for dataset_id in LogicalDatasetId
+    )
+
+
+def _data_result(*, attempt: int = 1, checksum: str = SHA256) -> DataPrepareResult:
+    return DataPrepareResult(
+        task_id=TASK_ID,
+        step_id="prepare_data",
+        attempt=attempt,
+        correlation_id=CORRELATION_ID,
+        assets=_assets(checksum=checksum),
+    )
+
+
+def _analysis_result(*, attempt: int = 1) -> AnalysisRunResult:
+    return AnalysisRunResult(
+        task_id=TASK_ID,
+        step_id="analyze_ndvi_change",
+        attempt=attempt,
+        correlation_id=CORRELATION_ID,
+        artifacts=_analysis_artifacts(attempt=attempt),
+        statistics=AreaStatistics(
+            increase_hectares=10,
+            stable_hectares=20,
+            decrease_hectares=5,
+            valid_hectares=35,
+        ),
+        elapsed_ms=120,
+    )
+
+
+def _quality_result(*, attempt: int = 1) -> QualityEvaluateResult:
+    return QualityEvaluateResult(
+        task_id=TASK_ID,
+        step_id="evaluate_quality",
+        attempt=attempt,
+        correlation_id=CORRELATION_ID,
+        metrics=_quality(),
+        artifact=_artifact(ArtifactType.QUALITY_REPORT, attempt=attempt),
+    )
+
+
+def _recovery_snapshot(resume_from_step_id: str) -> RecoverySnapshot:
+    completed = (
+        "prepare_data",
+        "analyze_ndvi_change",
+        "evaluate_quality",
+        "publish_results",
+    ).index(resume_from_step_id)
+    return RecoverySnapshot(
+        source_attempt=1,
+        resume_from_step_id=resume_from_step_id,
+        plan=build_builtin_recovery_plan(
+            task_id=TASK_ID,
+            plan_id=uuid4(),
+            created_at=NOW,
+        ),
+        data=_data_result() if completed >= 1 else None,
+        analysis=_analysis_result() if completed >= 2 else None,
+        quality=_quality_result() if completed >= 3 else None,
     )
 
 
@@ -123,11 +187,11 @@ def _tile_metadata(artifact_type: TileArtifactType) -> TileMetadata:
     )
 
 
-def _publisher_result() -> PublisherPublishResult:
-    report = _artifact(ArtifactType.PDF_REPORT)
+def _publisher_result(*, attempt: int = 1) -> PublisherPublishResult:
+    report = _artifact(ArtifactType.PDF_REPORT, attempt=attempt)
     resources = tuple(
         PublishedResource(
-            artifact_id=_artifact(ArtifactType(artifact_type.value)).artifact_id,
+            artifact_id=_artifact(ArtifactType(artifact_type.value), attempt=attempt).artifact_id,
             tile_template=(f"/api/v1/tiles/{TASK_ID}/{artifact_type.value}/{{z}}/{{x}}/{{y}}.png"),
             tile_metadata=_tile_metadata(artifact_type),
         )
@@ -136,7 +200,7 @@ def _publisher_result() -> PublisherPublishResult:
     return PublisherPublishResult(
         task_id=TASK_ID,
         step_id="publish_results",
-        attempt=1,
+        attempt=attempt,
         correlation_id=CORRELATION_ID,
         resources=(
             *resources,
@@ -164,9 +228,19 @@ class _Repository:
         self.records: list[TransitionCreate | ProgressCreate] = []
         self.artifacts: dict[UUID, ArtifactRef] = {}
         self.sequence = 0
+        self.recovery: RecoverySnapshot | None = None
 
     async def get_task(self, task_id: UUID) -> TaskResponse | None:
         return self.task if task_id == TASK_ID else None
+
+    async def get_recovery_snapshot(
+        self,
+        task_id: UUID,
+        attempt: int,
+    ) -> RecoverySnapshot | None:
+        assert task_id == TASK_ID
+        assert attempt == self.task.current_attempt
+        return self.recovery
 
     async def save_plan(self, plan: object, **_kwargs: object) -> None:
         self.task = self.task.model_copy(update={"plan": plan})
@@ -215,8 +289,10 @@ class _Repository:
 class _Planner:
     def __init__(self, task_id: UUID = TASK_ID) -> None:
         self.task_id = task_id
+        self.calls = 0
 
     async def create_plan(self, task: TaskResponse) -> PlanningOutcome:
+        self.calls += 1
         return PlanningOutcome(
             plan=build_builtin_recovery_plan(
                 task_id=self.task_id,
@@ -248,9 +324,13 @@ class _Agents:
         *,
         fail_at: AgentName | None = None,
         quality_conclusion: QualityConclusion = QualityConclusion.PASS,
+        fail_analysis_reuse_once: bool = False,
+        data_checksum: str = SHA256,
     ) -> None:
         self.fail_at = fail_at
         self.quality_conclusion = quality_conclusion
+        self.fail_analysis_reuse_once = fail_analysis_reuse_once
+        self.data_checksum = data_checksum
         self.commands: list[
             DataPrepareCommand
             | AnalysisRunCommand
@@ -281,13 +361,7 @@ class _Agents:
 
     async def prepare_data(self, command: DataPrepareCommand) -> DataPrepareResult:
         self._accept(AgentName.DATA, command)
-        return DataPrepareResult(
-            task_id=TASK_ID,
-            step_id=command.step_id,
-            attempt=1,
-            correlation_id=CORRELATION_ID,
-            assets=_assets(),
-        )
+        return _data_result(attempt=command.attempt, checksum=self.data_checksum)
 
     async def run_analysis(
         self,
@@ -297,20 +371,19 @@ class _Agents:
     ) -> AnalysisRunResult:
         assert idempotency_key.version == 5
         self._accept(AgentName.ANALYSIS, command)
-        return AnalysisRunResult(
-            task_id=TASK_ID,
-            step_id=command.step_id,
-            attempt=1,
-            correlation_id=CORRELATION_ID,
-            artifacts=_analysis_artifacts(),
-            statistics=AreaStatistics(
-                increase_hectares=10,
-                stable_hectares=20,
-                decrease_hectares=5,
-                valid_hectares=35,
-            ),
-            elapsed_ms=120,
-        )
+        if command.reuse_from_attempt is not None and self.fail_analysis_reuse_once:
+            self.fail_analysis_reuse_once = False
+            raise AgentCallError(
+                agent=AgentName.ANALYSIS,
+                step_id=command.step_id,
+                error=StructuredError(
+                    code=ErrorCode.ANALYSIS_FAILED,
+                    message="历史分析成果校验失败",
+                    retryable=True,
+                ),
+                elapsed_ms=10,
+            )
+        return _analysis_result(attempt=command.attempt)
 
     async def evaluate_quality(
         self,
@@ -320,14 +393,8 @@ class _Agents:
     ) -> QualityEvaluateResult:
         assert idempotency_key.version == 5
         self._accept(AgentName.QUALITY, command)
-        return QualityEvaluateResult(
-            task_id=TASK_ID,
-            step_id=command.step_id,
-            attempt=1,
-            correlation_id=CORRELATION_ID,
-            metrics=_quality(self.quality_conclusion),
-            artifact=_artifact(ArtifactType.QUALITY_REPORT),
-        )
+        result = _quality_result(attempt=command.attempt)
+        return result.model_copy(update={"metrics": _quality(self.quality_conclusion)})
 
     async def publish_results(
         self,
@@ -337,7 +404,7 @@ class _Agents:
     ) -> PublisherPublishResult:
         assert idempotency_key.version == 5
         self._accept(AgentName.PUBLISHER, command)
-        return _publisher_result()
+        return _publisher_result(attempt=command.attempt)
 
 
 @pytest.mark.asyncio
@@ -494,3 +561,100 @@ async def test_unexpected_planner_failure_is_sanitized_and_persisted() -> None:
     assert result.last_error.retryable is True
     assert "private planner detail" not in result.last_error.message
     assert agents.commands == []
+
+
+@pytest.mark.asyncio
+async def test_publisher_retry_reuses_verified_upstream_checkpoints() -> None:
+    repository = _Repository()
+    repository.task = repository.task.model_copy(update={"current_attempt": 2})
+    repository.recovery = _recovery_snapshot("publish_results")
+    planner = _Planner()
+    agents = _Agents()
+
+    result = await TaskOrchestrator(repository, agents, planner).run(TASK_ID, attempt=2)
+
+    assert result.status is TaskStatus.COMPLETED
+    assert planner.calls == 0
+    assert [command.step_id for command in agents.commands] == [
+        "prepare_data",
+        "analyze_ndvi_change",
+        "evaluate_quality",
+        "publish_results",
+    ]
+    analysis_command = agents.commands[1]
+    quality_command = agents.commands[2]
+    assert isinstance(analysis_command, AnalysisRunCommand)
+    assert isinstance(quality_command, QualityEvaluateCommand)
+    assert analysis_command.reuse_from_attempt == 1
+    assert quality_command.reuse_from_attempt == 1
+    terminal_steps = {
+        record.step_id: record
+        for record in repository.records
+        if record.step_status in {StepStatus.COMPLETED, StepStatus.SKIPPED}
+    }
+    assert terminal_steps["prepare_data"].step_status is StepStatus.SKIPPED
+    assert terminal_steps["analyze_ndvi_change"].step_status is StepStatus.SKIPPED
+    assert terminal_steps["evaluate_quality"].step_status is StepStatus.SKIPPED
+    assert terminal_steps["publish_results"].step_status is StepStatus.COMPLETED
+    assert all(
+        record.step_output is not None and record.step_output.attempt == 2
+        for record in terminal_steps.values()
+    )
+
+
+@pytest.mark.asyncio
+async def test_invalid_analysis_checkpoint_falls_back_to_recompute() -> None:
+    repository = _Repository()
+    repository.task = repository.task.model_copy(update={"current_attempt": 2})
+    repository.recovery = _recovery_snapshot("publish_results")
+    agents = _Agents(fail_analysis_reuse_once=True)
+
+    result = await TaskOrchestrator(repository, agents, _Planner()).run(TASK_ID, attempt=2)
+
+    assert result.status is TaskStatus.COMPLETED
+    analysis_commands = [
+        command for command in agents.commands if isinstance(command, AnalysisRunCommand)
+    ]
+    assert [command.reuse_from_attempt for command in analysis_commands] == [1, None]
+    quality_command = next(
+        command for command in agents.commands if isinstance(command, QualityEvaluateCommand)
+    )
+    assert quality_command.reuse_from_attempt is None
+    terminal_statuses = {
+        record.step_id: record.step_status
+        for record in repository.records
+        if record.step_status in {StepStatus.COMPLETED, StepStatus.SKIPPED}
+    }
+    assert terminal_statuses == {
+        "prepare_data": StepStatus.SKIPPED,
+        "analyze_ndvi_change": StepStatus.COMPLETED,
+        "evaluate_quality": StepStatus.COMPLETED,
+        "publish_results": StepStatus.COMPLETED,
+    }
+
+
+@pytest.mark.asyncio
+async def test_changed_data_manifest_forces_analysis_and_quality_recompute() -> None:
+    repository = _Repository()
+    repository.task = repository.task.model_copy(update={"current_attempt": 2})
+    repository.recovery = _recovery_snapshot("publish_results")
+    agents = _Agents(data_checksum="b" * 64)
+
+    result = await TaskOrchestrator(repository, agents, _Planner()).run(TASK_ID, attempt=2)
+
+    assert result.status is TaskStatus.COMPLETED
+    analysis_command = next(
+        command for command in agents.commands if isinstance(command, AnalysisRunCommand)
+    )
+    quality_command = next(
+        command for command in agents.commands if isinstance(command, QualityEvaluateCommand)
+    )
+    assert analysis_command.reuse_from_attempt is None
+    assert quality_command.reuse_from_attempt is None
+    data_terminal = next(
+        record
+        for record in repository.records
+        if record.step_id == "prepare_data"
+        and record.step_status in {StepStatus.COMPLETED, StepStatus.SKIPPED}
+    )
+    assert data_terminal.step_status is StepStatus.COMPLETED

@@ -73,10 +73,12 @@ class TaskStep(ContractModel):
 
     @model_validator(mode="after")
     def require_terminal_evidence(self) -> Self:
-        if self.status is StepStatus.COMPLETED and (
+        if self.status in {StepStatus.COMPLETED, StepStatus.SKIPPED} and (
             self.progress != 100 or self.completed_at is None or self.error is not None
         ):
-            raise ValueError("completed step requires 100 progress, completed_at, and no error")
+            raise ValueError(
+                "completed or skipped step requires 100 progress, completed_at, and no error"
+            )
         if self.status is StepStatus.FAILED and (self.completed_at is None or self.error is None):
             raise ValueError("failed step requires completed_at and structured error")
         return self

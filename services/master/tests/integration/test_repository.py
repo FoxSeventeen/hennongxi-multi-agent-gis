@@ -12,6 +12,8 @@ import pytest
 import pytest_asyncio
 from hennongxi_contracts import (
     AgentName,
+    AnalysisRunResult,
+    AreaStatistics,
     ArtifactRef,
     ArtifactStatus,
     ArtifactType,
@@ -26,6 +28,10 @@ from hennongxi_contracts import (
     PlanSource,
     PlanStep,
     PlanStepKind,
+    QualityConclusion,
+    QualityEvaluateResult,
+    QualityMetrics,
+    QualityThresholds,
     StepStatus,
     StructuredError,
     TaskStatus,
@@ -737,6 +743,250 @@ async def test_failed_task_retry_is_atomic_and_concurrent_requests_share_one_att
             .all()
         )
     assert attempts == [(1, "FAILED", None), (2, "PENDING", "analyze_ndvi_change")]
+
+
+@pytest.mark.asyncio
+async def test_retry_snapshot_loads_validated_upstream_outputs_without_new_model_call(
+    repository: TaskRepository,
+    engine: AsyncEngine,
+) -> None:
+    await create_pending_task(repository)
+    await repository.transition_task(
+        TransitionCreate(
+            task_id=TASK_ID,
+            attempt=1,
+            step_id="planning",
+            agent=AgentName.MASTER,
+            target_status=TaskStatus.PLANNING,
+            progress=5,
+            message="正在生成计划",
+            elapsed_ms=1,
+            occurred_at=NOW,
+        )
+    )
+    source_plan = plan()
+    await repository.save_plan(source_plan, attempt=1)
+    data = DataPrepareResult(
+        task_id=TASK_ID,
+        step_id="prepare_data",
+        attempt=1,
+        correlation_id=CORRELATION_ID,
+        assets=tuple(
+            DataAssetRef(
+                dataset_id=dataset_id,
+                checksum_sha256=SHA256,
+                byte_size=10,
+            )
+            for dataset_id in LogicalDatasetId
+        ),
+    )
+    analysis_artifacts = tuple(
+        ArtifactRef(
+            artifact_id=uuid4(),
+            task_id=TASK_ID,
+            attempt=1,
+            artifact_type=artifact_type,
+            status=ArtifactStatus.COMPLETE,
+            media_type=(
+                "application/json"
+                if artifact_type is ArtifactType.AREA_STATISTICS
+                else "image/tiff; application=geotiff"
+            ),
+            created_at=NOW,
+            checksum_sha256=SHA256,
+            byte_size=10,
+        )
+        for artifact_type in (
+            ArtifactType.NDVI_BEFORE,
+            ArtifactType.NDVI_AFTER,
+            ArtifactType.NDVI_DIFFERENCE,
+            ArtifactType.CHANGE_CLASSIFICATION,
+            ArtifactType.AREA_STATISTICS,
+        )
+    )
+    analysis = AnalysisRunResult(
+        task_id=TASK_ID,
+        step_id="analyze_ndvi_change",
+        attempt=1,
+        correlation_id=CORRELATION_ID,
+        artifacts=analysis_artifacts,
+        statistics=AreaStatistics(
+            increase_hectares=10,
+            stable_hectares=20,
+            decrease_hectares=5,
+            valid_hectares=35,
+        ),
+        elapsed_ms=120,
+    )
+    quality = QualityEvaluateResult(
+        task_id=TASK_ID,
+        step_id="evaluate_quality",
+        attempt=1,
+        correlation_id=CORRELATION_ID,
+        metrics=QualityMetrics(
+            coverage_ratio=0.98,
+            valid_pixel_ratio=0.96,
+            output_complete=True,
+            elapsed_ms=25,
+            thresholds=QualityThresholds(
+                minimum_watershed_coverage_ratio=0.95,
+                minimum_valid_pixel_ratio=0.90,
+            ),
+            conclusion=QualityConclusion.PASS,
+            passed=True,
+            evidence=("范围通过", "像元通过", "成果完整", "耗时已记录"),
+        ),
+        artifact=ArtifactRef(
+            artifact_id=uuid4(),
+            task_id=TASK_ID,
+            attempt=1,
+            artifact_type=ArtifactType.QUALITY_REPORT,
+            status=ArtifactStatus.COMPLETE,
+            media_type="application/json",
+            created_at=NOW,
+            checksum_sha256=SHA256,
+            byte_size=10,
+        ),
+    )
+    await repository.transition_task(
+        TransitionCreate(
+            task_id=TASK_ID,
+            attempt=1,
+            step_id="prepare_data",
+            agent=AgentName.DATA,
+            target_status=TaskStatus.DATA_PREPARING,
+            progress=10,
+            message="开始准备数据",
+            elapsed_ms=1,
+            occurred_at=NOW + timedelta(seconds=1),
+            step_status=StepStatus.RUNNING,
+            step_progress=0,
+            step_started_at=NOW + timedelta(seconds=1),
+        )
+    )
+    await repository.transition_task(
+        TransitionCreate(
+            task_id=TASK_ID,
+            attempt=1,
+            step_id="prepare_data",
+            agent=AgentName.DATA,
+            target_status=TaskStatus.ANALYZING,
+            progress=25,
+            message="数据准备完成",
+            elapsed_ms=2,
+            occurred_at=NOW + timedelta(seconds=2),
+            step_status=StepStatus.COMPLETED,
+            step_progress=100,
+            step_completed_at=NOW + timedelta(seconds=2),
+            step_output=data,
+        )
+    )
+    await repository.record_progress(
+        ProgressCreate(
+            task_id=TASK_ID,
+            attempt=1,
+            step_id="analyze_ndvi_change",
+            agent=AgentName.ANALYSIS,
+            target_status=TaskStatus.ANALYZING,
+            progress=30,
+            message="开始分析",
+            elapsed_ms=1,
+            occurred_at=NOW + timedelta(seconds=3),
+            step_status=StepStatus.RUNNING,
+            step_progress=0,
+            step_started_at=NOW + timedelta(seconds=3),
+        )
+    )
+    await repository.transition_task(
+        TransitionCreate(
+            task_id=TASK_ID,
+            attempt=1,
+            step_id="analyze_ndvi_change",
+            agent=AgentName.ANALYSIS,
+            target_status=TaskStatus.QUALITY_CHECKING,
+            progress=55,
+            message="分析完成",
+            elapsed_ms=3,
+            occurred_at=NOW + timedelta(seconds=4),
+            step_status=StepStatus.COMPLETED,
+            step_progress=100,
+            step_completed_at=NOW + timedelta(seconds=4),
+            step_output=analysis,
+        )
+    )
+    await repository.record_progress(
+        ProgressCreate(
+            task_id=TASK_ID,
+            attempt=1,
+            step_id="evaluate_quality",
+            agent=AgentName.QUALITY,
+            target_status=TaskStatus.QUALITY_CHECKING,
+            progress=60,
+            message="开始质量检查",
+            elapsed_ms=1,
+            occurred_at=NOW + timedelta(seconds=5),
+            step_status=StepStatus.RUNNING,
+            step_progress=0,
+            step_started_at=NOW + timedelta(seconds=5),
+        )
+    )
+    await repository.transition_task(
+        TransitionCreate(
+            task_id=TASK_ID,
+            attempt=1,
+            step_id="evaluate_quality",
+            agent=AgentName.QUALITY,
+            target_status=TaskStatus.PUBLISHING,
+            progress=75,
+            message="质量检查完成",
+            elapsed_ms=2,
+            occurred_at=NOW + timedelta(seconds=6),
+            step_status=StepStatus.COMPLETED,
+            step_progress=100,
+            step_completed_at=NOW + timedelta(seconds=6),
+            step_output=quality,
+        )
+    )
+    await repository.transition_task(
+        TransitionCreate(
+            task_id=TASK_ID,
+            attempt=1,
+            step_id="publish_results",
+            agent=AgentName.PUBLISHER,
+            target_status=TaskStatus.FAILED,
+            progress=80,
+            message="发布失败",
+            elapsed_ms=1,
+            occurred_at=NOW + timedelta(seconds=7),
+            error=StructuredError(
+                code=ErrorCode.PUBLISHING_FAILED,
+                message="发布服务暂时失败",
+                retryable=True,
+            ),
+            step_status=StepStatus.FAILED,
+            step_progress=0,
+            step_completed_at=NOW + timedelta(seconds=7),
+        )
+    )
+    await repository.retry_failed_task(TASK_ID, accepted_at=NOW + timedelta(seconds=8))
+
+    snapshot = await repository.get_recovery_snapshot(TASK_ID, 2)
+
+    assert snapshot is not None
+    assert snapshot.source_attempt == 1
+    assert snapshot.resume_from_step_id == "publish_results"
+    assert snapshot.plan == source_plan
+    assert snapshot.data == data
+    assert snapshot.analysis == analysis
+    assert snapshot.quality == quality
+
+    reused_plan = source_plan.model_copy(
+        update={"plan_id": uuid4(), "created_at": NOW + timedelta(seconds=9)}
+    )
+    await repository.save_plan(reused_plan, attempt=2, reused=True)
+    async with engine.connect() as connection:
+        model_call_count = await connection.scalar(text("SELECT count(*) FROM model_calls"))
+    assert model_call_count == 1
 
 
 @pytest.mark.asyncio

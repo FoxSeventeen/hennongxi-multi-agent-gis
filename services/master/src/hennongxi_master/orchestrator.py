@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from time import monotonic
 from typing import Protocol
-from uuid import UUID, uuid5
+from uuid import UUID, uuid4, uuid5
 
 import structlog
 from hennongxi_contracts import (
@@ -35,7 +35,12 @@ from hennongxi_contracts import (
 )
 
 from hennongxi_master.agent_client import AgentCallError
-from hennongxi_master.repository import ArtifactCreate, ProgressCreate, TransitionCreate
+from hennongxi_master.repository import (
+    ArtifactCreate,
+    ProgressCreate,
+    RecoverySnapshot,
+    TransitionCreate,
+)
 
 _LOGGER = structlog.get_logger("hennongxi.master.orchestrator")
 _IDEMPOTENCY_NAMESPACE = UUID("917e647d-2f28-4dcc-9d05-27003c72e9bb")
@@ -61,12 +66,19 @@ class PlanningOutcome:
 class OrchestrationRepository(Protocol):
     async def get_task(self, task_id: UUID) -> TaskResponse | None: ...
 
+    async def get_recovery_snapshot(
+        self,
+        task_id: UUID,
+        attempt: int,
+    ) -> RecoverySnapshot | None: ...
+
     async def save_plan(
         self,
         plan: ExecutionPlan,
         *,
         attempt: int,
         failed_model_call: ModelCallRecord | None = None,
+        reused: bool = False,
     ) -> None: ...
 
     async def record_artifacts(self, values: tuple[ArtifactCreate, ...]) -> None: ...
@@ -143,6 +155,14 @@ class TaskOrchestrator:
             "attempt": attempt,
             "correlation_id": str(task.correlation_id),
         }
+        recovery = await self._repository.get_recovery_snapshot(task.task_id, attempt)
+        if recovery is not None:
+            _LOGGER.info(
+                "retry_checkpoint_selected",
+                **identity,
+                source_attempt=recovery.source_attempt,
+                resume_from_step_id=recovery.resume_from_step_id,
+            )
         _LOGGER.info("orchestration_started", **identity)
         await self._transition(
             task,
@@ -151,30 +171,49 @@ class TaskOrchestrator:
             agent=AgentName.MASTER,
             target_status=TaskStatus.PLANNING,
             progress=5,
-            message="正在生成受约束的执行计划",
+            message=(
+                "正在恢复已验证的执行计划"
+                if recovery is not None and recovery.plan is not None
+                else "正在生成受约束的执行计划"
+            ),
         )
 
-        try:
-            planning = await self._planner.create_plan(task)
-        except Exception as planner_error:
-            _LOGGER.error(
-                "planning_failed",
+        reused_plan = recovery is not None and recovery.plan is not None
+        if reused_plan:
+            assert recovery is not None and recovery.plan is not None
+            planning = PlanningOutcome(
+                plan=recovery.plan.model_copy(
+                    update={"plan_id": uuid4(), "created_at": self._now()}
+                )
+            )
+            _LOGGER.info(
+                "retry_checkpoint_reused",
                 **identity,
-                error_type=type(planner_error).__name__,
-            )
-            return await self._fail_without_step(
-                task,
-                attempt=attempt,
-                current_status=TaskStatus.PLANNING,
-                progress=5,
+                source_attempt=recovery.source_attempt,
                 step_id="planning",
-                agent=AgentName.MASTER,
-                error=StructuredError(
-                    code=ErrorCode.INTERNAL_ERROR,
-                    message="执行计划生成失败",
-                    retryable=True,
-                ),
             )
+        else:
+            try:
+                planning = await self._planner.create_plan(task)
+            except Exception as planner_error:
+                _LOGGER.error(
+                    "planning_failed",
+                    **identity,
+                    error_type=type(planner_error).__name__,
+                )
+                return await self._fail_without_step(
+                    task,
+                    attempt=attempt,
+                    current_status=TaskStatus.PLANNING,
+                    progress=5,
+                    step_id="planning",
+                    agent=AgentName.MASTER,
+                    error=StructuredError(
+                        code=ErrorCode.INTERNAL_ERROR,
+                        message="执行计划生成失败",
+                        retryable=True,
+                    ),
+                )
         if planning.plan.task_id != task.task_id:
             return await self._fail_without_step(
                 task,
@@ -193,6 +232,7 @@ class TaskOrchestrator:
             planning.plan,
             attempt=attempt,
             failed_model_call=planning.failed_model_call,
+            reused=reused_plan,
         )
 
         await self._transition(
@@ -227,6 +267,33 @@ class TaskOrchestrator:
                 error=error,
             )
         data_elapsed = _elapsed_ms(data_started)
+        data_reused = (
+            recovery is not None
+            and recovery.resume_from_step_id
+            in {"analyze_ndvi_change", "evaluate_quality", "publish_results"}
+            and recovery.data is not None
+            and _same_data_assets(recovery.data, data)
+        )
+        if data_reused:
+            assert recovery is not None
+            _LOGGER.info(
+                "retry_checkpoint_reused",
+                **identity,
+                source_attempt=recovery.source_attempt,
+                step_id="prepare_data",
+            )
+        elif recovery is not None and recovery.resume_from_step_id != "prepare_data":
+            _LOGGER.info(
+                "retry_checkpoint_recompute",
+                **identity,
+                source_attempt=recovery.source_attempt,
+                step_id="prepare_data",
+                reason=(
+                    "data_inputs_changed"
+                    if recovery.data is not None and not _same_data_assets(recovery.data, data)
+                    else "checkpoint_evidence_unavailable"
+                ),
+            )
 
         await self._transition(
             task,
@@ -235,9 +302,9 @@ class TaskOrchestrator:
             agent=AgentName.DATA,
             target_status=TaskStatus.ANALYZING,
             progress=25,
-            message="批准数据校验完成",
+            message=("批准数据复核通过，沿用安全检查点" if data_reused else "批准数据校验完成"),
             elapsed_ms=data_elapsed,
-            step_status=StepStatus.COMPLETED,
+            step_status=StepStatus.SKIPPED if data_reused else StepStatus.COMPLETED,
             step_progress=100,
             step_completed_at=self._now(),
             step_output=data,
@@ -255,24 +322,83 @@ class TaskOrchestrator:
             step_started_at=self._now(),
         )
         analysis_started = monotonic()
+        analysis_reuse_from = (
+            recovery.source_attempt
+            if recovery is not None
+            and recovery.resume_from_step_id in {"evaluate_quality", "publish_results"}
+            and recovery.analysis is not None
+            and recovery.data is not None
+            and _same_data_assets(recovery.data, data)
+            else None
+        )
+        analysis_command = AnalysisRunCommand(
+            task_id=task.task_id,
+            step_id="analyze_ndvi_change",
+            attempt=attempt,
+            correlation_id=task.correlation_id,
+            inputs=data.assets,
+            reuse_from_attempt=analysis_reuse_from,
+        )
+        analysis_reused = False
         try:
             analysis = await self._agents.run_analysis(
-                AnalysisRunCommand(
-                    task_id=task.task_id,
-                    step_id="analyze_ndvi_change",
-                    attempt=attempt,
-                    correlation_id=task.correlation_id,
-                    inputs=data.assets,
-                ),
+                analysis_command,
                 idempotency_key=_idempotency_key(task.task_id, attempt, "analyze_ndvi_change"),
             )
+            analysis_reused = analysis_reuse_from is not None
         except AgentCallError as error:
-            return await self._fail_agent(
-                task,
-                attempt=attempt,
-                current_status=TaskStatus.ANALYZING,
-                progress=30,
-                error=error,
+            if analysis_reuse_from is None:
+                return await self._fail_agent(
+                    task,
+                    attempt=attempt,
+                    current_status=TaskStatus.ANALYZING,
+                    progress=30,
+                    error=error,
+                )
+            _LOGGER.warning(
+                "retry_checkpoint_recompute",
+                **identity,
+                source_attempt=analysis_reuse_from,
+                step_id="analyze_ndvi_change",
+                reason="artifact_promotion_failed",
+                error_code=error.error.code.value,
+            )
+            try:
+                analysis = await self._agents.run_analysis(
+                    analysis_command.model_copy(update={"reuse_from_attempt": None}),
+                    idempotency_key=_idempotency_key(task.task_id, attempt, "analyze_ndvi_change"),
+                )
+            except AgentCallError as recompute_error:
+                return await self._fail_agent(
+                    task,
+                    attempt=attempt,
+                    current_status=TaskStatus.ANALYZING,
+                    progress=30,
+                    error=recompute_error,
+                )
+        if analysis_reused:
+            assert recovery is not None
+            _LOGGER.info(
+                "retry_checkpoint_reused",
+                **identity,
+                source_attempt=recovery.source_attempt,
+                step_id="analyze_ndvi_change",
+            )
+        elif (
+            recovery is not None
+            and recovery.resume_from_step_id in {"evaluate_quality", "publish_results"}
+            and analysis_reuse_from is None
+        ):
+            _LOGGER.info(
+                "retry_checkpoint_recompute",
+                **identity,
+                source_attempt=recovery.source_attempt,
+                step_id="analyze_ndvi_change",
+                reason=(
+                    "data_inputs_changed"
+                    if recovery.data is not None and not _same_data_assets(recovery.data, data)
+                    else "checkpoint_evidence_unavailable"
+                ),
             )
         analysis_elapsed = _elapsed_ms(analysis_started)
         await self._record_artifacts(
@@ -288,9 +414,13 @@ class TaskOrchestrator:
             agent=AgentName.ANALYSIS,
             target_status=TaskStatus.QUALITY_CHECKING,
             progress=55,
-            message="NDVI 分析成果已原子发布",
+            message=(
+                "NDVI 分析成果校验通过并提升到当前尝试"
+                if analysis_reused
+                else "NDVI 分析成果已原子发布"
+            ),
             elapsed_ms=analysis_elapsed,
-            step_status=StepStatus.COMPLETED,
+            step_status=StepStatus.SKIPPED if analysis_reused else StepStatus.COMPLETED,
             step_progress=100,
             step_completed_at=self._now(),
             artifact_ids=tuple(artifact.artifact_id for artifact in analysis.artifacts),
@@ -309,25 +439,85 @@ class TaskOrchestrator:
             step_started_at=self._now(),
         )
         quality_started = monotonic()
+        quality_reuse_from = (
+            recovery.source_attempt
+            if recovery is not None
+            and recovery.resume_from_step_id == "publish_results"
+            and recovery.quality is not None
+            and recovery.quality.metrics.conclusion is QualityConclusion.PASS
+            and recovery.quality.metrics.passed
+            and analysis_reused
+            else None
+        )
+        quality_command = QualityEvaluateCommand(
+            task_id=task.task_id,
+            step_id="evaluate_quality",
+            attempt=attempt,
+            correlation_id=task.correlation_id,
+            artifacts=analysis.artifacts,
+            analysis_elapsed_ms=analysis.elapsed_ms,
+            reuse_from_attempt=quality_reuse_from,
+        )
+        quality_reused = False
         try:
             quality = await self._agents.evaluate_quality(
-                QualityEvaluateCommand(
-                    task_id=task.task_id,
-                    step_id="evaluate_quality",
-                    attempt=attempt,
-                    correlation_id=task.correlation_id,
-                    artifacts=analysis.artifacts,
-                    analysis_elapsed_ms=analysis.elapsed_ms,
-                ),
+                quality_command,
                 idempotency_key=_idempotency_key(task.task_id, attempt, "evaluate_quality"),
             )
+            quality_reused = quality_reuse_from is not None
         except AgentCallError as error:
-            return await self._fail_agent(
-                task,
-                attempt=attempt,
-                current_status=TaskStatus.QUALITY_CHECKING,
-                progress=60,
-                error=error,
+            if quality_reuse_from is None:
+                return await self._fail_agent(
+                    task,
+                    attempt=attempt,
+                    current_status=TaskStatus.QUALITY_CHECKING,
+                    progress=60,
+                    error=error,
+                )
+            _LOGGER.warning(
+                "retry_checkpoint_recompute",
+                **identity,
+                source_attempt=quality_reuse_from,
+                step_id="evaluate_quality",
+                reason="artifact_promotion_failed",
+                error_code=error.error.code.value,
+            )
+            try:
+                quality = await self._agents.evaluate_quality(
+                    quality_command.model_copy(update={"reuse_from_attempt": None}),
+                    idempotency_key=_idempotency_key(task.task_id, attempt, "evaluate_quality"),
+                )
+            except AgentCallError as recompute_error:
+                return await self._fail_agent(
+                    task,
+                    attempt=attempt,
+                    current_status=TaskStatus.QUALITY_CHECKING,
+                    progress=60,
+                    error=recompute_error,
+                )
+        if quality_reused:
+            assert recovery is not None
+            _LOGGER.info(
+                "retry_checkpoint_reused",
+                **identity,
+                source_attempt=recovery.source_attempt,
+                step_id="evaluate_quality",
+            )
+        elif (
+            recovery is not None
+            and recovery.resume_from_step_id == "publish_results"
+            and quality_reuse_from is None
+        ):
+            _LOGGER.info(
+                "retry_checkpoint_recompute",
+                **identity,
+                source_attempt=recovery.source_attempt,
+                step_id="evaluate_quality",
+                reason=(
+                    "analysis_was_recomputed"
+                    if not analysis_reused
+                    else "checkpoint_evidence_unavailable"
+                ),
             )
         quality_elapsed = _elapsed_ms(quality_started)
         await self._record_artifacts(
@@ -373,9 +563,9 @@ class TaskOrchestrator:
             agent=AgentName.QUALITY,
             target_status=TaskStatus.PUBLISHING,
             progress=75,
-            message="质量核验通过",
+            message=("质量报告复核通过并提升到当前尝试" if quality_reused else "质量核验通过"),
             elapsed_ms=quality_elapsed,
-            step_status=StepStatus.COMPLETED,
+            step_status=StepStatus.SKIPPED if quality_reused else StepStatus.COMPLETED,
             step_progress=100,
             step_completed_at=self._now(),
             artifact_ids=(quality.artifact.artifact_id,),
@@ -675,3 +865,9 @@ def _utc_now() -> datetime:
 
 def _elapsed_ms(started: float) -> int:
     return max(0, round((monotonic() - started) * 1000))
+
+
+def _same_data_assets(previous: DataPrepareResult, current: DataPrepareResult) -> bool:
+    return {asset.dataset_id: asset for asset in previous.assets} == {
+        asset.dataset_id: asset for asset in current.assets
+    }

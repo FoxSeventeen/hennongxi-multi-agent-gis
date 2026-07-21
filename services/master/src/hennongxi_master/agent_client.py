@@ -213,7 +213,7 @@ class AgentHttpClient:
                 "POST",
                 f"{base_url}{path}",
                 headers=headers,
-                json=command.model_dump(mode="json"),
+                json=command.model_dump(mode="json", exclude_none=True),
                 follow_redirects=False,
             ) as response:
                 body = await _read_bounded_body(

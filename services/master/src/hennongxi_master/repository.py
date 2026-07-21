@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any, Self
+from typing import Any, Self, overload
 from uuid import UUID, uuid4
 
 from hennongxi_contracts import (
@@ -135,21 +135,23 @@ class TransitionCreate(RepositoryInput):
             return self
         if self.step_progress is None:
             raise ValueError("step_status requires step_progress")
-        if self.step_status is StepStatus.COMPLETED and (
+        if self.step_status in {StepStatus.COMPLETED, StepStatus.SKIPPED} and (
             self.step_progress != 100 or self.step_completed_at is None or self.error is not None
         ):
-            raise ValueError("completed step requires 100 progress and completion evidence")
+            raise ValueError(
+                "completed or skipped step requires 100 progress and completion evidence"
+            )
         if self.step_status is StepStatus.FAILED and (
             self.step_completed_at is None or self.error is None
         ):
             raise ValueError("failed step requires completion time and structured error")
         if self.step_output is not None and (
-            self.step_status is not StepStatus.COMPLETED
+            self.step_status not in {StepStatus.COMPLETED, StepStatus.SKIPPED}
             or self.step_output.task_id != self.task_id
             or self.step_output.attempt != self.attempt
             or self.step_output.step_id != self.step_id
         ):
-            raise ValueError("step output must match completed task, attempt, and step evidence")
+            raise ValueError("step output must match terminal task, attempt, and step evidence")
         return self
 
 
@@ -193,6 +195,18 @@ class RetryAttemptResult:
     response: RetryAcceptedResponse
     event: TaskEvent | None
     created: bool
+
+
+@dataclass(frozen=True, slots=True)
+class RecoverySnapshot:
+    """Validated durable evidence available to one retry attempt."""
+
+    source_attempt: int
+    resume_from_step_id: str
+    plan: ExecutionPlan | None
+    data: DataPrepareResult | None
+    analysis: AnalysisRunResult | None
+    quality: QualityEvaluateResult | None
 
 
 class RepositoryNotFound(LookupError):
@@ -444,7 +458,10 @@ class TaskRepository:
         *,
         attempt: int,
         failed_model_call: ModelCallRecord | None = None,
+        reused: bool = False,
     ) -> None:
+        if reused and failed_model_call is not None:
+            raise ValueError("reused plan cannot record a new failed model call")
         if failed_model_call is not None and (
             plan.source is not PlanSource.BUILTIN_RECOVERY
             or failed_model_call.status is not ModelCallStatus.FAILED
@@ -452,7 +469,7 @@ class TaskRepository:
             raise ValueError(
                 "failed_model_call requires a BUILTIN_RECOVERY plan and FAILED evidence"
             )
-        model_call = failed_model_call or plan.model_call
+        model_call = None if reused else failed_model_call or plan.model_call
         payload = plan.model_dump(mode="json")
         async with self._sessions.begin() as session:
             await session.execute(
@@ -513,6 +530,84 @@ class TaskRepository:
                         "depends_on_step_id": step.depends_on[0] if step.depends_on else None,
                     },
                 )
+
+    async def get_recovery_snapshot(
+        self,
+        task_id: UUID,
+        attempt: int,
+    ) -> RecoverySnapshot | None:
+        """Load fail-closed retry evidence without mutating prior attempts."""
+
+        if attempt <= 1:
+            return None
+        async with self._sessions() as session:
+            retry = (
+                (
+                    await session.execute(
+                        text(
+                            "SELECT a.resume_from_step_id FROM attempts a "
+                            "JOIN tasks t ON t.task_id = a.task_id "
+                            "AND t.current_attempt = a.attempt "
+                            "WHERE a.task_id = :task_id AND a.attempt = :attempt"
+                        ),
+                        {"task_id": task_id, "attempt": attempt},
+                    )
+                )
+                .mappings()
+                .one_or_none()
+            )
+            if retry is None:
+                raise RepositoryConflict("retry attempt is not current")
+            resume_from_step_id = retry["resume_from_step_id"]
+            if resume_from_step_id is None:
+                return None
+
+            source_attempt = attempt - 1
+            plan_payload = await session.scalar(
+                text("SELECT payload FROM plans WHERE task_id = :task_id AND attempt = :attempt"),
+                {"task_id": task_id, "attempt": source_attempt},
+            )
+            plan = _validated_recovery_plan(plan_payload, task_id)
+            rows = (
+                (
+                    await session.execute(
+                        text(
+                            "SELECT step_id, status, output FROM steps "
+                            "WHERE task_id = :task_id AND attempt = :attempt"
+                        ),
+                        {"task_id": task_id, "attempt": source_attempt},
+                    )
+                )
+                .mappings()
+                .all()
+            )
+            outputs = {str(row["step_id"]): row for row in rows}
+            return RecoverySnapshot(
+                source_attempt=source_attempt,
+                resume_from_step_id=str(resume_from_step_id),
+                plan=plan,
+                data=_validated_step_output(
+                    outputs.get("prepare_data"),
+                    DataPrepareResult,
+                    task_id=task_id,
+                    attempt=source_attempt,
+                    step_id="prepare_data",
+                ),
+                analysis=_validated_step_output(
+                    outputs.get("analyze_ndvi_change"),
+                    AnalysisRunResult,
+                    task_id=task_id,
+                    attempt=source_attempt,
+                    step_id="analyze_ndvi_change",
+                ),
+                quality=_validated_step_output(
+                    outputs.get("evaluate_quality"),
+                    QualityEvaluateResult,
+                    task_id=task_id,
+                    attempt=source_attempt,
+                    step_id="evaluate_quality",
+                ),
+            )
 
     async def record_artifact(self, value: ArtifactCreate) -> None:
         await self.record_artifacts((value,))
@@ -1040,6 +1135,72 @@ class TaskRepository:
 
 def _json(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+
+
+def _validated_recovery_plan(payload: object, task_id: UUID) -> ExecutionPlan | None:
+    if payload is None:
+        return None
+    try:
+        plan = ExecutionPlan.model_validate(payload)
+    except (TypeError, ValueError):
+        return None
+    return plan if plan.task_id == task_id else None
+
+
+@overload
+def _validated_step_output(
+    row: RowMapping | None,
+    model: type[DataPrepareResult],
+    *,
+    task_id: UUID,
+    attempt: int,
+    step_id: str,
+) -> DataPrepareResult | None: ...
+
+
+@overload
+def _validated_step_output(
+    row: RowMapping | None,
+    model: type[AnalysisRunResult],
+    *,
+    task_id: UUID,
+    attempt: int,
+    step_id: str,
+) -> AnalysisRunResult | None: ...
+
+
+@overload
+def _validated_step_output(
+    row: RowMapping | None,
+    model: type[QualityEvaluateResult],
+    *,
+    task_id: UUID,
+    attempt: int,
+    step_id: str,
+) -> QualityEvaluateResult | None: ...
+
+
+def _validated_step_output(
+    row: RowMapping | None,
+    model: type[DataPrepareResult] | type[AnalysisRunResult] | type[QualityEvaluateResult],
+    *,
+    task_id: UUID,
+    attempt: int,
+    step_id: str,
+) -> DataPrepareResult | AnalysisRunResult | QualityEvaluateResult | None:
+    if (
+        row is None
+        or row["status"] not in {StepStatus.COMPLETED.value, StepStatus.SKIPPED.value}
+        or row["output"] is None
+    ):
+        return None
+    try:
+        output = model.model_validate(row["output"])
+    except (TypeError, ValueError):
+        return None
+    if output.task_id != task_id or output.attempt != attempt or output.step_id != step_id:
+        return None
+    return output
 
 
 _UTC_DATETIME = TypeAdapter(UtcDateTime)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
@@ -198,6 +199,7 @@ async def test_analysis_call_sends_stable_execution_headers_and_validates_respon
         assert request.url == httpx.URL("http://analysis-agent:8002/internal/v1/analysis/run")
         assert request.headers["Idempotency-Key"] == str(idempotency_key)
         assert request.headers["X-Correlation-ID"] == str(CORRELATION_ID)
+        assert "reuse_from_attempt" not in json.loads(request.content)
         result = AnalysisRunResult(
             task_id=TASK_ID,
             step_id=command.step_id,
