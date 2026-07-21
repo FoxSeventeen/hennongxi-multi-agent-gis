@@ -47,6 +47,7 @@ describe("readiness application shell", () => {
     expect(screen.getByRole("status")).toHaveTextContent("正在检查系统就绪状态");
 
     expect(await screen.findByText("系统已就绪")).toBeVisible();
+    expect(screen.getByRole("button", { name: "创建监测任务" })).toBeEnabled();
     expect(screen.getByText("主控 Agent")).toBeVisible();
     expect(screen.getByText("分析 Agent")).toBeVisible();
     expect(screen.getAllByText("正常")).toHaveLength(2);
@@ -66,6 +67,8 @@ describe("readiness application shell", () => {
     expect(await screen.findByText("需要完成配置")).toBeVisible();
     expect(screen.getByText("尚未配置大模型访问凭据")).toBeVisible();
     expect(screen.getByText("待配置")).toBeVisible();
+    expect(screen.getByRole("button", { name: "创建监测任务" })).toBeDisabled();
+    expect(screen.getByText("系统就绪后才可创建任务")).toBeVisible();
   });
 
   it("offers an accessible retry after readiness loading fails", async () => {

@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 
-import type { MasterClient, ReadinessSnapshot } from "../api/client";
+import type { AcceptedTask, MasterClient, ReadinessSnapshot } from "../api/client";
 import { MapWorkspace } from "../components/MapWorkspace";
 import { ReadinessPanel } from "../components/ReadinessPanel";
+import { TaskComposer } from "../components/TaskComposer";
 import "./app.css";
 
 interface AppProps {
@@ -17,6 +18,7 @@ type ReadinessState =
 export function App({ client }: AppProps) {
   const [refreshIndex, setRefreshIndex] = useState(0);
   const [readinessState, setReadinessState] = useState<ReadinessState>({ phase: "loading" });
+  const [activeTask, setActiveTask] = useState<AcceptedTask | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -41,6 +43,8 @@ export function App({ client }: AppProps) {
 
   const environmentLabel =
     readinessState.phase === "ready" && readinessState.snapshot.ready ? "环境可用" : "检查环境";
+  const canSubmit = readinessState.phase === "ready" && readinessState.snapshot.ready;
+  const disabledReason = getSubmissionDisabledReason(readinessState);
 
   return (
     <div className="app-shell">
@@ -56,8 +60,14 @@ export function App({ client }: AppProps) {
       </header>
 
       <main className="workspace-layout">
-        <MapWorkspace />
+        <MapWorkspace activeTask={activeTask} />
         <aside className="control-rail" aria-label="任务与状态控制区">
+          <TaskComposer
+            client={client}
+            canSubmit={canSubmit}
+            disabledReason={disabledReason}
+            onAccepted={setActiveTask}
+          />
           <ReadinessPanel
             state={readinessState}
             onRetry={() => {
@@ -68,4 +78,17 @@ export function App({ client }: AppProps) {
       </main>
     </div>
   );
+}
+
+function getSubmissionDisabledReason(state: ReadinessState): string | undefined {
+  if (state.phase === "loading") {
+    return "完成系统状态检查后即可创建任务";
+  }
+  if (state.phase === "error") {
+    return "恢复 Master 连接后才可创建任务";
+  }
+  if (!state.snapshot.ready) {
+    return "系统就绪后才可创建任务";
+  }
+  return undefined;
 }

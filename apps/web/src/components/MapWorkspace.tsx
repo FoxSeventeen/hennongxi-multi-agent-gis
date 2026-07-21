@@ -1,4 +1,10 @@
-export function MapWorkspace() {
+import type { AcceptedTask } from "../api/client";
+
+interface MapWorkspaceProps {
+  readonly activeTask: AcceptedTask | null;
+}
+
+export function MapWorkspace({ activeTask }: MapWorkspaceProps) {
   return (
     <section className="map-workspace" aria-labelledby="map-workspace-title">
       <div className="map-heading">
@@ -8,7 +14,7 @@ export function MapWorkspace() {
         </div>
         <p className="map-state">
           <span aria-hidden="true" />
-          等待任务
+          {activeTask === null ? "等待任务" : "任务已接收"}
         </p>
       </div>
 
@@ -49,8 +55,12 @@ export function MapWorkspace() {
           <span>110°19′E</span>
         </div>
         <div className="map-empty-state">
-          <p>地图已就位</p>
-          <span>任务完成后，真实流域边界与 NDVI 图层将在这里叠加。</span>
+          <p>{activeTask === null ? "地图已就位" : "等待分析图层"}</p>
+          <span>
+            {activeTask === null
+              ? "任务完成后，真实流域边界与 NDVI 图层将在这里叠加。"
+              : `任务 ${activeTask.taskId.slice(0, 8)} 已进入队列，分析结果将叠加到此处。`}
+          </span>
         </div>
         <div className="map-scale" aria-hidden="true">
           <span />

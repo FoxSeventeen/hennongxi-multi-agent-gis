@@ -70,7 +70,7 @@ function PanelHeading() {
   return (
     <div className="panel-heading" aria-hidden="true">
       <p className="section-kicker">运行环境</p>
-      <span className="panel-index">01</span>
+      <span className="panel-index">02</span>
     </div>
   );
 }
