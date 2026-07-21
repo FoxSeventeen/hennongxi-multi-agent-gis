@@ -864,3 +864,16 @@ def test_task_query_exposes_only_same_task_publication_metadata() -> None:
             updated_at=NOW,
             publication=publication,
         )
+
+    with pytest.raises(ValidationError, match="publication must belong to the current task"):
+        TaskResponse(
+            task_id=TASK_ID,
+            query="监测神农溪生态变化",
+            status=TaskStatus.COMPLETED,
+            progress=100,
+            current_attempt=1,
+            correlation_id=UUID("ffffffff-ffff-4fff-8fff-ffffffffffff"),
+            created_at=NOW,
+            updated_at=NOW,
+            publication=publication,
+        )

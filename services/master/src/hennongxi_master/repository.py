@@ -1154,6 +1154,7 @@ class TaskRepository:
                 task_id=task_id,
                 attempt=attempt,
                 step_id="publish_results",
+                correlation_id=UUID(str(task["correlation_id"])),
             )
             all_artifacts = tuple(artifact for _, artifact in artifacts)
             last_error = (
@@ -1341,6 +1342,7 @@ def _validated_step_output(
     task_id: UUID,
     attempt: int,
     step_id: str,
+    correlation_id: UUID | None = None,
 ) -> DataPrepareResult | None: ...
 
 
@@ -1352,6 +1354,7 @@ def _validated_step_output(
     task_id: UUID,
     attempt: int,
     step_id: str,
+    correlation_id: UUID | None = None,
 ) -> AnalysisRunResult | None: ...
 
 
@@ -1363,6 +1366,7 @@ def _validated_step_output(
     task_id: UUID,
     attempt: int,
     step_id: str,
+    correlation_id: UUID | None = None,
 ) -> QualityEvaluateResult | None: ...
 
 
@@ -1374,6 +1378,7 @@ def _validated_step_output(
     task_id: UUID,
     attempt: int,
     step_id: str,
+    correlation_id: UUID | None = None,
 ) -> PublisherPublishResult | None: ...
 
 
@@ -1389,6 +1394,7 @@ def _validated_step_output(
     task_id: UUID,
     attempt: int,
     step_id: str,
+    correlation_id: UUID | None = None,
 ) -> DataPrepareResult | AnalysisRunResult | QualityEvaluateResult | PublisherPublishResult | None:
     if (
         row is None
@@ -1400,7 +1406,12 @@ def _validated_step_output(
         output = model.model_validate(row["output"])
     except (TypeError, ValueError):
         return None
-    if output.task_id != task_id or output.attempt != attempt or output.step_id != step_id:
+    if (
+        output.task_id != task_id
+        or output.attempt != attempt
+        or output.step_id != step_id
+        or (correlation_id is not None and output.correlation_id != correlation_id)
+    ):
         return None
     return output
 

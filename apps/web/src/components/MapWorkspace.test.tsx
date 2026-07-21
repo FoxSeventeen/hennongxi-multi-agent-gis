@@ -106,6 +106,11 @@ describe("MapWorkspace", () => {
       map?.emit("load");
     });
 
+    expect(
+      screen.getByRole("group", {
+        name: "神农溪完整流域边界与NDVI 差值图层，观测日期 2019-08-19 — 2024-08-12",
+      }),
+    ).toBeVisible();
     expect(screen.getByRole("group", { name: "NDVI 图层" })).toBeVisible();
     expect(screen.getByRole("button", { name: "NDVI 差值" })).toHaveAttribute(
       "aria-pressed",

@@ -167,7 +167,7 @@ function PublishedMap({ presentation }: { readonly presentation: MapPresentation
       <div
         ref={containerRef}
         className="maplibre-surface"
-        role="img"
+        role="group"
         aria-label={`神农溪完整流域边界与${activeLayer.label}图层，观测日期 ${activeLayer.periodLabel}`}
       />
       {loadState === "loading" ? (
