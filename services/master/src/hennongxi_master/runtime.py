@@ -46,6 +46,8 @@ def create_worker_runtime(
     config: WorkerConfig,
     environment: Mapping[str, str] | None = None,
     event_publisher: EventPublisher | None = None,
+    *,
+    study_area_grounder: StudyAreaGrounder | None = None,
 ) -> MasterWorkerRuntime:
     """Build one worker with shared, bounded HTTP connection pools."""
 
@@ -63,20 +65,21 @@ def create_worker_runtime(
         http_clients.append(llm_http_client)
         llm_adapter = LlmPlanningAdapter(llm_config, llm_http_client)
 
-    try:
-        amap_config = AmapConfig.from_environment(environment)
-    except AmapConfigurationError:
-        study_area_grounder = StudyAreaGrounder(None)
-        _LOGGER.warning(
-            "study_area_online_check_unconfigured",
-            reason_code="ONLINE_CHECK_NOT_CONFIGURED",
-        )
-    else:
-        amap_http_client = _create_amap_async_client(amap_config)
-        http_clients.append(amap_http_client)
-        study_area_grounder = StudyAreaGrounder(
-            AmapStudyAreaVerifier(amap_config, amap_http_client)
-        )
+    if study_area_grounder is None:
+        try:
+            amap_config = AmapConfig.from_environment(environment)
+        except AmapConfigurationError:
+            study_area_grounder = StudyAreaGrounder(None)
+            _LOGGER.warning(
+                "study_area_online_check_unconfigured",
+                reason_code="ONLINE_CHECK_NOT_CONFIGURED",
+            )
+        else:
+            amap_http_client = _create_amap_async_client(amap_config)
+            http_clients.append(amap_http_client)
+            study_area_grounder = StudyAreaGrounder(
+                AmapStudyAreaVerifier(amap_config, amap_http_client)
+            )
 
     planner = RecoveryTaskPlanner(llm_adapter)
     orchestrator = TaskOrchestrator(

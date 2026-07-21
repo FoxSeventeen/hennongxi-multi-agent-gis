@@ -32,6 +32,7 @@ def test_e2e_profile_uses_only_private_deterministic_upstreams() -> None:
     assert master_environment["LLM_BASE_URL"] == "http://e2e-support:8999/v1"
     assert master_environment["AMAP_WEB_SERVICE_KEY"] == ""
     assert master_environment["DATA_MANIFEST_PATH"] == "/e2e/data/manifest.json"
+    assert services["master-agent"]["command"][1] == "tests.e2e.master:app"
     assert services["web"]["ports"] == []
     assert services["master-agent"]["ports"] == []
     assert services["publisher-agent"]["ports"] == []

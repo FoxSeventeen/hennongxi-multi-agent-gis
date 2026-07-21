@@ -113,3 +113,25 @@ def test_worker_runtime_injects_bounded_amap_verifier_only_into_master() -> None
     assert "test-amap-runtime-key" not in repr(runtime)
 
     asyncio.run(runtime.close())
+
+
+def test_worker_runtime_accepts_an_explicit_test_grounder_without_amap_network() -> None:
+    environment = {
+        **_environment(True),
+        "AMAP_WEB_SERVICE_KEY": "must-not-create-an-amap-client",
+    }
+    injected_grounder = StudyAreaGrounder(None)
+
+    runtime = create_worker_runtime(
+        cast(TaskRepository, _Repository()),
+        WorkerConfig.from_environment(environment),
+        environment,
+        study_area_grounder=injected_grounder,
+    )
+    runner = cast(TaskOrchestrator, runtime.worker._runner)
+
+    assert runner._study_area_grounder is injected_grounder
+    assert len(runtime.http_clients) == 1
+    assert "must-not-create-an-amap-client" not in repr(runtime)
+
+    asyncio.run(runtime.close())
