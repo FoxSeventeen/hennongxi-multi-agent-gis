@@ -355,30 +355,47 @@ class TaskRepository:
                 )
 
     async def record_artifact(self, value: ArtifactCreate) -> None:
-        artifact = value.artifact
+        await self.record_artifacts((value,))
+
+    async def record_artifacts(self, values: tuple[ArtifactCreate, ...]) -> None:
+        """Persist one complete Agent artifact set in a single transaction."""
+
+        if not values:
+            return
+        scopes = {(value.artifact.task_id, value.artifact.attempt) for value in values}
+        artifact_ids = {value.artifact.artifact_id for value in values}
+        artifact_types = {value.artifact.artifact_type for value in values}
+        if len(scopes) != 1:
+            raise ValueError("artifact batch must belong to one task attempt")
+        if len(artifact_ids) != len(values) or len(artifact_types) != len(values):
+            raise ValueError("artifact batch requires unique identities and types")
+
         async with self._sessions.begin() as session:
-            await session.execute(
-                text(
-                    "INSERT INTO artifacts "
-                    "(artifact_id, task_id, attempt, step_id, artifact_type, status, media_type, "
-                    "storage_key, checksum_sha256, byte_size, created_at) "
-                    "VALUES (:artifact_id, :task_id, :attempt, :step_id, :artifact_type, "
-                    ":status, :media_type, :storage_key, :checksum_sha256, :byte_size, :created_at)"
-                ),
-                {
-                    "artifact_id": artifact.artifact_id,
-                    "task_id": artifact.task_id,
-                    "attempt": artifact.attempt,
-                    "step_id": value.step_id,
-                    "artifact_type": artifact.artifact_type.value,
-                    "status": artifact.status.value,
-                    "media_type": artifact.media_type,
-                    "storage_key": value.storage_key,
-                    "checksum_sha256": artifact.checksum_sha256,
-                    "byte_size": artifact.byte_size,
-                    "created_at": artifact.created_at,
-                },
-            )
+            for value in values:
+                artifact = value.artifact
+                await session.execute(
+                    text(
+                        "INSERT INTO artifacts "
+                        "(artifact_id, task_id, attempt, step_id, artifact_type, status, "
+                        "media_type, storage_key, checksum_sha256, byte_size, created_at) "
+                        "VALUES (:artifact_id, :task_id, :attempt, :step_id, :artifact_type, "
+                        ":status, :media_type, :storage_key, :checksum_sha256, :byte_size, "
+                        ":created_at)"
+                    ),
+                    {
+                        "artifact_id": artifact.artifact_id,
+                        "task_id": artifact.task_id,
+                        "attempt": artifact.attempt,
+                        "step_id": value.step_id,
+                        "artifact_type": artifact.artifact_type.value,
+                        "status": artifact.status.value,
+                        "media_type": artifact.media_type,
+                        "storage_key": value.storage_key,
+                        "checksum_sha256": artifact.checksum_sha256,
+                        "byte_size": artifact.byte_size,
+                        "created_at": artifact.created_at,
+                    },
+                )
 
     async def transition_task(self, value: TransitionCreate) -> TaskEvent:
         return await self._record_task_event(value, require_state_change=True)

@@ -499,6 +499,52 @@ async def test_same_state_progress_rejects_stale_state_without_partial_writes(
     assert [event.sequence for event in await repository.list_events(TASK_ID)] == [1]
 
 
+@pytest.mark.asyncio
+async def test_artifact_batch_rolls_back_every_item_when_one_step_is_invalid(
+    repository: TaskRepository,
+    engine: AsyncEngine,
+) -> None:
+    await create_pending_task(repository)
+    await repository.save_plan(plan(), attempt=1)
+    first = ArtifactRef(
+        artifact_id=ARTIFACT_ID,
+        task_id=TASK_ID,
+        attempt=1,
+        artifact_type=ArtifactType.NDVI_BEFORE,
+        status=ArtifactStatus.COMPLETE,
+        media_type="image/tiff; application=geotiff",
+        created_at=NOW,
+        checksum_sha256=SHA256,
+        byte_size=10,
+    )
+    second = first.model_copy(
+        update={
+            "artifact_id": UUID("ffffffff-ffff-4fff-8fff-ffffffffffff"),
+            "artifact_type": ArtifactType.NDVI_AFTER,
+        }
+    )
+
+    with pytest.raises(IntegrityError):
+        await repository.record_artifacts(
+            (
+                ArtifactCreate(
+                    artifact=first,
+                    step_id="analyze_ndvi_change",
+                    storage_key=f"{TASK_ID}/attempt-1/analysis/ndvi_before",
+                ),
+                ArtifactCreate(
+                    artifact=second,
+                    step_id="missing_step",
+                    storage_key=f"{TASK_ID}/attempt-1/analysis/ndvi_after",
+                ),
+            )
+        )
+
+    async with engine.connect() as connection:
+        artifact_count = await connection.scalar(text("SELECT count(*) FROM artifacts"))
+    assert artifact_count == 0
+
+
 async def assert_constraint_rejects(
     engine: AsyncEngine,
     statement: str,
