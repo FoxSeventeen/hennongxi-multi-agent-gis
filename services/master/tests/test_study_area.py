@@ -3,6 +3,9 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
+from fastapi.testclient import TestClient
+from hennongxi_contracts import ErrorCode, ErrorResponse
+from hennongxi_master.main import create_master_app
 from hennongxi_master.study_area import (
     StudyAreaConclusion,
     StudyAreaEvidence,
@@ -138,3 +141,22 @@ def test_study_area_evidence_rejects_inconsistent_conclusions(
             reason_code=reason_code,
             retryable=retryable,
         )
+
+
+def test_task_api_rejects_clear_out_of_scope_location_before_repository_access() -> None:
+    master = create_master_app({"ORCHESTRATION_WORKER_ENABLED": "false"})
+    repository_factory_calls: list[None] = []
+    master.state.task_repository_factory = lambda: repository_factory_calls.append(None)
+
+    with TestClient(master) as client:
+        response = client.post(
+            "/api/v1/tasks",
+            json={"query": "分析武汉市东湖植被变化"},
+        )
+
+    assert response.status_code == 422
+    error = ErrorResponse.model_validate(response.json()).error
+    assert error.code is ErrorCode.VALIDATION_ERROR
+    assert error.message == "目前仅支持神农溪流域生态变化监测"
+    assert error.retryable is False
+    assert repository_factory_calls == []

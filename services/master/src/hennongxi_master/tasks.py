@@ -30,6 +30,7 @@ from hennongxi_master.repository import (
     RetryAttemptResult,
     WatershedCreate,
 )
+from hennongxi_master.study_area import StudyAreaIntent, resolve_study_area
 from hennongxi_master.watershed import load_approved_watershed
 
 APPROVED_WATERSHED_SLUG = "shennongxi"
@@ -151,6 +152,13 @@ def install_master_task_routes(app: FastAPI) -> None:
         },
     )
     async def create_task(payload: CreateTaskRequest, request: Request) -> TaskAcceptedResponse:
+        if resolve_study_area(payload.query) is StudyAreaIntent.OUT_OF_SCOPE:
+            raise _failure(
+                status_code=422,
+                code=ErrorCode.VALIDATION_ERROR,
+                message="目前仅支持神农溪流域生态变化监测",
+                retryable=False,
+            )
         repository = _repository(request)
         task_id = uuid4()
         correlation_id = UUID(str(request.state.correlation_id))
