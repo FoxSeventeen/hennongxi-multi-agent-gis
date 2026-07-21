@@ -635,26 +635,28 @@ The critical path is contracts → persistence/events → raster chain → orche
 
 **工作量：**中等。
 
-#### Task 21: Display watershed and computed raster layers in MapLibre
+#### 任务 21：使用 MapLibre 显示流域与计算栅格图层
 
-**Description:** Render the complete watershed boundary plus toggleable date-1 NDVI, date-2 NDVI, and difference tiles, with dates, bounds fitting, legends, loading/error states, and stable layer ordering.
+**说明：**渲染完整神农溪流域边界，并提供前期 NDVI、后期 NDVI 和差值瓦片切换；同时展示日期、自动适配边界、图例、加载/错误状态和稳定的图层顺序。
 
-**Acceptance criteria:**
+**契约补充：**Publisher 已验证的日期、边界、单位、数据归属、图例和安全相对资源地址保存在当前尝试的发布步骤输出中。现有 `GET /api/v1/tasks/{task_id}` 响应增加可空的 `publication` 字段来重建该输出；不新增公共路由，既有消费者可继续忽略该字段。Web 使用已批准且离线打包的完整流域边界，不在演示时下载边界数据。
 
-- [ ] The map initially fits the full watershed and each computed layer can be activated independently without hiding the boundary.
-- [ ] Legends, dates, values/units, color ramps, nodata transparency, and source attribution match Publisher metadata.
-- [ ] Missing/failed tiles show a recoverable Chinese error and do not crash or blank the rest of the workflow UI.
+**验收标准：**
 
-**Verification:**
+- [ ] 地图初始适配完整流域范围；三个计算图层均可独立激活，流域边界始终可见。
+- [ ] 图例、日期、数值/单位、颜色、nodata 透明度和数据归属与 Publisher 元数据一致。
+- [ ] 瓦片缺失或失败时显示可恢复的中文错误，不导致其余工作流界面崩溃或空白。
 
-- [ ] `docker compose run --rm web npm test -- --run -t 'map|layer|legend'`
-- [ ] Real-browser network/visual check confirms expected tile requests, boundary extent, layer switching, and no console errors.
+**验证：**
 
-**Dependencies:** T12, T19, T20.
+- [ ] `docker compose run --rm --no-deps web npm test -- --run -t 'map|layer|legend'`
+- [ ] 真实浏览器网络与视觉检查确认瓦片请求、完整边界范围、图层切换和控制台均符合预期。
 
-**Files likely touched:** `apps/web/src/features/map/`, map styles/config, map tests.
+**依赖：**T12、T19、T20。
 
-**Estimated scope:** M.
+**预计修改文件：**`apps/web/src/features/map/`、任务查询契约/客户端、地图样式与测试，以及 Master 当前发布输出重建。
+
+**工作量：**中等。
 
 #### Checkpoint G: Observable user journey
 

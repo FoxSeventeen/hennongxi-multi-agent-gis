@@ -160,6 +160,10 @@ async def test_worker_runs_complete_agent_chain_over_private_http(
     assert task.progress == 100
     assert task.correlation_id == correlation_id
     assert task.plan is not None and task.plan.source is PlanSource.BUILTIN_RECOVERY
+    assert task.publication is not None
+    assert task.publication.task_id == task_id
+    assert task.publication.attempt == 1
+    assert len(task.publication.resources) == 5
     assert tuple(step.status for step in task.steps) == (StepStatus.COMPLETED,) * 4
     assert {artifact.artifact_type for artifact in task.artifacts} == REQUIRED_ARTIFACTS
     assert all(artifact.task_id == task_id and artifact.attempt == 1 for artifact in task.artifacts)

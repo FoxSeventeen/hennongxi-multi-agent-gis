@@ -9,6 +9,7 @@ from uuid import UUID
 from pydantic import Field, model_validator
 
 from hennongxi_contracts.artifacts import ArtifactRef
+from hennongxi_contracts.commands import PublisherPublishResult
 from hennongxi_contracts.common import (
     AgentName,
     ContractModel,
@@ -97,6 +98,7 @@ class TaskResponse(ContractModel):
     steps: tuple[TaskStep, ...] = ()
     artifacts: tuple[ArtifactRef, ...] = ()
     last_error: StructuredError | None = None
+    publication: PublisherPublishResult | None = None
 
     @model_validator(mode="after")
     def require_consistent_terminal_state(self) -> Self:
@@ -118,4 +120,10 @@ class TaskResponse(ContractModel):
             for artifact in step.artifacts
         ):
             raise ValueError("step artifacts must belong to the same task and attempt")
+        if self.publication is not None and (
+            self.publication.task_id != self.task_id
+            or self.publication.attempt != self.current_attempt
+            or self.publication.correlation_id != self.correlation_id
+        ):
+            raise ValueError("publication must belong to the current task attempt")
         return self

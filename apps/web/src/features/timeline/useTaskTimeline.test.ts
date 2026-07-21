@@ -21,6 +21,7 @@ function snapshot(status: TaskStatus, progress: number): TaskSnapshot {
     plan: null,
     steps: [],
     lastError: null,
+    publication: null,
   };
 }
 

@@ -11,10 +11,14 @@ type ErrorDetailWire = components["schemas"]["ErrorDetail"];
 type ExecutionPlanWire = components["schemas"]["ExecutionPlan"];
 type ModelCallRecordWire = components["schemas"]["ModelCallRecord"];
 type PlanStepWire = components["schemas"]["PlanStep"];
+type PublishedResourceWire = components["schemas"]["PublishedResource"];
+type PublisherPublishResultWire = components["schemas"]["PublisherPublishResult"];
 type StructuredErrorWire = components["schemas"]["StructuredError"];
 type TaskEventWire = components["schemas"]["TaskEvent"];
 type TaskResponseWire = components["schemas"]["TaskResponse"];
 type TaskStepWire = components["schemas"]["TaskStep"];
+type TileLegendEntryWire = components["schemas"]["TileLegendEntry"];
+type TileMetadataWire = components["schemas"]["TileMetadata"];
 
 export interface TimelineErrorDetail {
   readonly field: string | null;
@@ -69,6 +73,36 @@ export interface TaskStep {
   readonly error: TimelineError | null;
 }
 
+export interface TaskTileLegendEntry {
+  readonly value: number;
+  readonly label: string;
+  readonly color: string;
+}
+
+export interface TaskTileMetadata {
+  readonly artifactType: components["schemas"]["TileArtifactType"];
+  readonly boundsWgs84: readonly [number, number, number, number];
+  readonly startDate: string;
+  readonly endDate: string;
+  readonly units: string;
+  readonly attribution: string;
+  readonly legend: readonly TaskTileLegendEntry[];
+}
+
+export interface TaskPublishedResource {
+  readonly artifactId: string;
+  readonly tileTemplate: string | null;
+  readonly downloadPath: string | null;
+  readonly tileMetadata: TaskTileMetadata | null;
+}
+
+export interface TaskPublication {
+  readonly taskId: string;
+  readonly attempt: number;
+  readonly correlationId: string;
+  readonly resources: readonly TaskPublishedResource[];
+}
+
 export interface TaskSnapshot {
   readonly taskId: string;
   readonly query: string;
@@ -81,6 +115,7 @@ export interface TaskSnapshot {
   readonly plan: TaskPlan | null;
   readonly steps: readonly TaskStep[];
   readonly lastError: TimelineError | null;
+  readonly publication: TaskPublication | null;
 }
 
 export interface TaskEvent {
@@ -143,6 +178,12 @@ const taskStatuses = new Set<string>([
   "COMPLETED",
   "FAILED",
 ]);
+const tileArtifactTypes = new Set<string>([
+  "NDVI_BEFORE",
+  "NDVI_AFTER",
+  "NDVI_DIFFERENCE",
+  "CHANGE_CLASSIFICATION",
+]);
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const stepIdPattern = /^[a-z][a-z0-9_]{0,63}$/;
 const sha256Pattern = /^[0-9a-f]{64}$/;
@@ -152,7 +193,14 @@ export function isTaskId(value: string): boolean {
 }
 
 export function parseTaskSnapshot(value: unknown, expectedTaskId: string): TaskSnapshot | null {
-  if (!isTaskResponse(value) || value.task_id !== expectedTaskId) {
+  if (
+    !isTaskResponse(value) ||
+    value.task_id !== expectedTaskId ||
+    (value.publication != null &&
+      (value.publication.task_id !== value.task_id ||
+        value.publication.attempt !== value.current_attempt ||
+        value.publication.correlation_id !== value.correlation_id))
+  ) {
     return null;
   }
   return {
@@ -167,6 +215,7 @@ export function parseTaskSnapshot(value: unknown, expectedTaskId: string): TaskS
     plan: value.plan == null ? null : mapPlan(value.plan),
     steps: value.steps.map(mapTaskStep),
     lastError: value.last_error == null ? null : mapError(value.last_error),
+    publication: value.publication == null ? null : mapPublication(value.publication),
   };
 }
 
@@ -239,6 +288,40 @@ function mapTaskStep(value: TaskStepWire): TaskStep {
   };
 }
 
+function mapPublication(value: PublisherPublishResultWire): TaskPublication {
+  return {
+    taskId: value.task_id,
+    attempt: value.attempt,
+    correlationId: value.correlation_id,
+    resources: value.resources.map(mapPublishedResource),
+  };
+}
+
+function mapPublishedResource(value: PublishedResourceWire): TaskPublishedResource {
+  return {
+    artifactId: value.artifact_id,
+    tileTemplate: value.tile_template ?? null,
+    downloadPath: value.download_path ?? null,
+    tileMetadata: value.tile_metadata == null ? null : mapTileMetadata(value.tile_metadata),
+  };
+}
+
+function mapTileMetadata(value: TileMetadataWire): TaskTileMetadata {
+  return {
+    artifactType: value.artifact_type,
+    boundsWgs84: value.bounds_wgs84,
+    startDate: value.start_date,
+    endDate: value.end_date,
+    units: value.units,
+    attribution: value.attribution,
+    legend: value.legend.map((entry) => ({
+      value: entry.value,
+      label: entry.label,
+      color: entry.color,
+    })),
+  };
+}
+
 function mapError(value: StructuredErrorWire): TimelineError {
   return {
     code: value.code,
@@ -267,6 +350,7 @@ function isTaskResponse(value: unknown): value is TaskResponseWire {
       "steps",
       "artifacts",
       "last_error",
+      "publication",
     ]) &&
     hasSchemaVersion(value) &&
     isUuid(value["task_id"]) &&
@@ -280,7 +364,132 @@ function isTaskResponse(value: unknown): value is TaskResponseWire {
     isOptionalNullable(value["plan"], isExecutionPlan) &&
     isArrayOf(value["steps"], isTaskStep) &&
     isArrayOf(value["artifacts"], isArtifactRef) &&
-    isOptionalNullable(value["last_error"], isStructuredError)
+    isOptionalNullable(value["last_error"], isStructuredError) &&
+    isOptionalNullable(value["publication"], isPublisherPublishResult)
+  );
+}
+
+function isPublisherPublishResult(value: unknown): value is PublisherPublishResultWire {
+  if (
+    !isRecordWithKeys(value, [
+      "schema_version",
+      "task_id",
+      "step_id",
+      "attempt",
+      "correlation_id",
+      "resources",
+      "report",
+    ]) ||
+    !hasSchemaVersion(value) ||
+    !isUuid(value["task_id"]) ||
+    value["step_id"] !== "publish_results" ||
+    !isIntegerBetween(value["attempt"], 1, Number.MAX_SAFE_INTEGER) ||
+    !isUuid(value["correlation_id"]) ||
+    !isArrayOf(value["resources"], isPublishedResource) ||
+    !isArtifactRef(value["report"])
+  ) {
+    return false;
+  }
+
+  const taskId = value["task_id"];
+  const attempt = value["attempt"];
+  const resources = value["resources"];
+  const report = value["report"];
+  const tileResources = resources.filter(
+    (resource): resource is PublishedResourceWire & { readonly tile_metadata: TileMetadataWire } =>
+      resource.tile_template != null && resource.tile_metadata != null,
+  );
+  const downloadResources = resources.filter((resource) => resource.download_path != null);
+  const publishedTypes = new Set<string>(
+    tileResources.map((resource) => resource.tile_metadata.artifact_type),
+  );
+  const downloadResource = downloadResources[0];
+
+  return (
+    report.task_id === taskId &&
+    report.attempt === attempt &&
+    report.artifact_type === "PDF_REPORT" &&
+    report.status === "COMPLETE" &&
+    report.media_type === "application/pdf" &&
+    resources.length === 5 &&
+    tileResources.length === tileArtifactTypes.size &&
+    publishedTypes.size === tileArtifactTypes.size &&
+    [...tileArtifactTypes].every((artifactType) => publishedTypes.has(artifactType)) &&
+    tileResources.every(
+      (resource) =>
+        resource.tile_template ===
+        `/api/v1/tiles/${taskId}/${resource.tile_metadata.artifact_type}/{z}/{x}/{y}.png`,
+    ) &&
+    downloadResources.length === 1 &&
+    downloadResource?.artifact_id === report.artifact_id &&
+    downloadResource.download_path ===
+      `/api/v1/tasks/${taskId}/artifacts/${report.artifact_id}/download`
+  );
+}
+
+function isPublishedResource(value: unknown): value is PublishedResourceWire {
+  if (
+    !isRecordWithKeys(value, [
+      "schema_version",
+      "artifact_id",
+      "tile_template",
+      "download_path",
+      "tile_metadata",
+    ]) ||
+    !hasSchemaVersion(value) ||
+    !isUuid(value["artifact_id"]) ||
+    !isOptionalNullable(value["tile_template"], isSafeApiPath) ||
+    !isOptionalNullable(value["download_path"], isSafeApiPath) ||
+    !isOptionalNullable(value["tile_metadata"], isTileMetadata)
+  ) {
+    return false;
+  }
+  const hasTile = value["tile_template"] != null;
+  const hasDownload = value["download_path"] != null;
+  return (hasTile || hasDownload) && hasTile === (value["tile_metadata"] != null);
+}
+
+function isTileMetadata(value: unknown): value is TileMetadataWire {
+  if (
+    !isRecordWithKeys(value, [
+      "schema_version",
+      "artifact_type",
+      "bounds_wgs84",
+      "start_date",
+      "end_date",
+      "units",
+      "attribution",
+      "legend",
+    ]) ||
+    !hasSchemaVersion(value) ||
+    typeof value["artifact_type"] !== "string" ||
+    !tileArtifactTypes.has(value["artifact_type"]) ||
+    !isWgs84Bounds(value["bounds_wgs84"]) ||
+    !isIsoDate(value["start_date"]) ||
+    !isIsoDate(value["end_date"]) ||
+    value["start_date"] > value["end_date"] ||
+    !isBoundedText(value["units"], 200) ||
+    !isBoundedText(value["attribution"], 200) ||
+    !isArrayOf(value["legend"], isTileLegendEntry) ||
+    value["legend"].length < 2 ||
+    value["legend"].length > 12
+  ) {
+    return false;
+  }
+  return value["legend"].every(
+    (entry, index, entries) => index === 0 || Number(entries[index - 1]?.value) < entry.value,
+  );
+}
+
+function isTileLegendEntry(value: unknown): value is TileLegendEntryWire {
+  return (
+    isRecordWithKeys(value, ["schema_version", "value", "label", "color"]) &&
+    hasSchemaVersion(value) &&
+    typeof value["value"] === "number" &&
+    Number.isFinite(value["value"]) &&
+    isBoundedText(value["label"], 200) &&
+    typeof value["color"] === "string" &&
+    /^#[0-9a-f]{6}$/i.test(value["color"])
   );
 }
 
@@ -495,6 +704,33 @@ function isUtcDateTime(value: unknown): value is string {
     /(?:Z|[+-]00:00)$/i.test(value) &&
     Number.isFinite(Date.parse(value))
   );
+}
+
+function isIsoDate(value: unknown): value is string {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return false;
+  }
+  const parsed = new Date(`${value}T00:00:00Z`);
+  return Number.isFinite(parsed.valueOf()) && parsed.toISOString().slice(0, 10) === value;
+}
+
+function isSafeApiPath(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.startsWith("/api/v1/") &&
+    !value.includes("://") &&
+    !value.includes("..") &&
+    !value.includes("\\") &&
+    Array.from(value).length <= 200
+  );
+}
+
+function isWgs84Bounds(value: unknown): value is readonly [number, number, number, number] {
+  if (!Array.isArray(value) || value.length !== 4 || !value.every(Number.isFinite)) {
+    return false;
+  }
+  const [west, south, east, north] = value as [number, number, number, number];
+  return west >= -180 && west < east && east <= 180 && south >= -90 && south < north && north <= 90;
 }
 
 function isStepId(value: unknown): value is string {

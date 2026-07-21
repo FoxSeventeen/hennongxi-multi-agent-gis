@@ -1776,6 +1776,10 @@ components:
           anyOf:
           - $ref: '#/components/schemas/StructuredError'
           - type: 'null'
+        publication:
+          anyOf:
+          - $ref: '#/components/schemas/PublisherPublishResult'
+          - type: 'null'
       additionalProperties: false
       type: object
       required:

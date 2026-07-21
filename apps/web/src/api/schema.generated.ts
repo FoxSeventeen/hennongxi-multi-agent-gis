@@ -1014,6 +1014,7 @@ export interface components {
              */
             readonly artifacts: readonly components["schemas"]["ArtifactRef"][];
             readonly last_error?: components["schemas"]["StructuredError"] | null;
+            readonly publication?: components["schemas"]["PublisherPublishResult"] | null;
         };
         /**
          * TaskStatus

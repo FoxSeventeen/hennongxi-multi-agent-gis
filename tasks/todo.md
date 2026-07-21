@@ -169,12 +169,12 @@ Source of truth: `docs/spec.md` at `92e50a6`. Detailed rationale, file scope, an
 - [x] T19-T20 在笔记本与窄视口尺寸下通过验证。
 - [x] 从任务创建到实时进度的流程可以承受断线和刷新。
 
-## Day 8 — Map and result UI
+## 第 8 天——地图与结果界面
 
-- [ ] **T21 Display watershed/computed layers** (depends: T12, T19-T20)
-  - [ ] Fit the complete watershed and toggle both NDVI dates/difference while keeping boundary visible.
-  - [ ] Match Publisher dates/bounds/legends/colors/units/attribution and handle tile errors.
-  - [ ] Pass component plus real-browser tile/network/console/visual checks.
+- [ ] **T21 显示流域与计算图层**（依赖：T12、T19-T20）
+  - [ ] 适配完整流域，并在边界始终可见的情况下切换前后期 NDVI 与差值图层。
+  - [ ] 匹配 Publisher 的日期、边界、图例、颜色、单位和数据归属，并处理瓦片错误。
+  - [ ] 通过组件测试以及真实浏览器的瓦片网络、控制台和视觉检查。
 - [ ] **T22 Present results/report/retry** (depends: T13-T14, T18, T20)
   - [ ] Show NDVI/change/area stats, four quality metrics, conclusion, LLM evidence, and PDF.
   - [ ] Distinguish real/fallback planning and failure/incomplete/completed states honestly.

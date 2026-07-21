@@ -113,6 +113,7 @@ describe("readiness application shell", () => {
       plan: null,
       steps: [],
       lastError: null,
+      publication: null,
     };
     const terminalEvent: TaskEvent = {
       sequence: 8,
@@ -164,6 +165,7 @@ describe("readiness application shell", () => {
       plan: null,
       steps: [],
       lastError: null,
+      publication: null,
     };
     const createTask = vi.fn<MasterClient["createTask"]>().mockResolvedValue(acceptedTask);
     const getTask = vi.fn<MasterClient["getTask"]>().mockResolvedValue(pendingSnapshot);

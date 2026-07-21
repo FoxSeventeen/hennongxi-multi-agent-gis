@@ -1145,6 +1145,16 @@ class TaskRepository:
                 _step_from_row(row, tuple(artifacts_by_step.get(str(row["step_id"]), ())))
                 for row in step_rows
             )
+            publication = _validated_step_output(
+                next(
+                    (row for row in step_rows if str(row["step_id"]) == "publish_results"),
+                    None,
+                ),
+                PublisherPublishResult,
+                task_id=task_id,
+                attempt=attempt,
+                step_id="publish_results",
+            )
             all_artifacts = tuple(artifact for _, artifact in artifacts)
             last_error = (
                 StructuredError.model_validate(task["last_error"])
@@ -1164,6 +1174,7 @@ class TaskRepository:
                 steps=steps,
                 artifacts=all_artifacts,
                 last_error=last_error,
+                publication=publication,
             )
 
     async def list_events(
@@ -1355,14 +1366,30 @@ def _validated_step_output(
 ) -> QualityEvaluateResult | None: ...
 
 
+@overload
 def _validated_step_output(
     row: RowMapping | None,
-    model: type[DataPrepareResult] | type[AnalysisRunResult] | type[QualityEvaluateResult],
+    model: type[PublisherPublishResult],
     *,
     task_id: UUID,
     attempt: int,
     step_id: str,
-) -> DataPrepareResult | AnalysisRunResult | QualityEvaluateResult | None:
+) -> PublisherPublishResult | None: ...
+
+
+def _validated_step_output(
+    row: RowMapping | None,
+    model: (
+        type[DataPrepareResult]
+        | type[AnalysisRunResult]
+        | type[QualityEvaluateResult]
+        | type[PublisherPublishResult]
+    ),
+    *,
+    task_id: UUID,
+    attempt: int,
+    step_id: str,
+) -> DataPrepareResult | AnalysisRunResult | QualityEvaluateResult | PublisherPublishResult | None:
     if (
         row is None
         or row["status"] not in {StepStatus.COMPLETED.value, StepStatus.SKIPPED.value}

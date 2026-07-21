@@ -827,3 +827,40 @@ def test_task_query_rejects_cross_task_artifacts() -> None:
             updated_at=NOW,
             artifacts=(valid_artifact(task_id=UUID("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee")),),
         )
+
+
+def test_task_query_exposes_only_same_task_publication_metadata() -> None:
+    publication = PublisherPublishResult(
+        task_id=TASK_ID,
+        step_id="publish_results",
+        attempt=1,
+        correlation_id=CORRELATION_ID,
+        resources=_published_resources_with_report(),
+        report=_published_report(),
+    )
+    response = TaskResponse(
+        task_id=TASK_ID,
+        query="监测神农溪生态变化",
+        status=TaskStatus.COMPLETED,
+        progress=100,
+        current_attempt=1,
+        correlation_id=CORRELATION_ID,
+        created_at=NOW,
+        updated_at=NOW,
+        publication=publication,
+    )
+
+    assert response.publication == publication
+
+    with pytest.raises(ValidationError, match="publication must belong to the current task"):
+        TaskResponse(
+            task_id=UUID("dddddddd-dddd-4ddd-8ddd-dddddddddddd"),
+            query="监测神农溪生态变化",
+            status=TaskStatus.COMPLETED,
+            progress=100,
+            current_attempt=1,
+            correlation_id=CORRELATION_ID,
+            created_at=NOW,
+            updated_at=NOW,
+            publication=publication,
+        )
