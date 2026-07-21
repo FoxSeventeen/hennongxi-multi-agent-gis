@@ -136,6 +136,25 @@ class QualityArtifactStore:
             raise ValueError("attempt must be positive")
         return self._report_root / str(task_id) / f"attempt-{attempt}" / "quality"
 
+    def load_verified_result(self, task_id: UUID, attempt: int) -> QualityEvaluateResult:
+        """Load one immutable prior result only after its receipt and report revalidate."""
+
+        directory = self.final_directory(task_id, attempt)
+        root = self._report_root.resolve()
+        try:
+            directory.resolve(strict=True).relative_to(root)
+        except (OSError, ValueError) as error:
+            raise QualityArtifactIntegrityError(
+                "published quality report is outside report storage"
+            ) from error
+        task_directory = directory.parent.parent
+        if any(path.is_symlink() for path in (task_directory, directory.parent, directory)):
+            raise QualityArtifactIntegrityError(
+                "published quality report directory cannot contain symlinks"
+            )
+        _, result = self._load_verified(directory, task_id, attempt)
+        return result
+
     @contextmanager
     def session(
         self,

@@ -8,7 +8,7 @@ from uuid import UUID
 import numpy as np
 import pytest
 import rasterio
-from hennongxi_analysis_agent.artifacts import AnalysisArtifactStore
+from hennongxi_analysis_agent.artifacts import AnalysisArtifactStore, ArtifactIntegrityError
 from hennongxi_analysis_agent.execution import AnalysisExecutor, AnalysisInputError
 from hennongxi_contracts import (
     AnalysisRunCommand,
@@ -141,13 +141,19 @@ def _write_fixture(tmp_path: Path) -> tuple[Path, Path, Path, tuple[DataAssetRef
     return manifest_path, data_root, cache_dir, tuple(inputs)
 
 
-def _command(inputs: tuple[DataAssetRef, ...]) -> AnalysisRunCommand:
+def _command(
+    inputs: tuple[DataAssetRef, ...],
+    *,
+    attempt: int = 1,
+    reuse_from_attempt: int | None = None,
+) -> AnalysisRunCommand:
     return AnalysisRunCommand(
         task_id=TASK_ID,
         step_id="analyze_ndvi_change",
-        attempt=1,
+        attempt=attempt,
         correlation_id=CORRELATION_ID,
         inputs=inputs,
+        reuse_from_attempt=reuse_from_attempt,
     )
 
 
@@ -202,6 +208,41 @@ def test_executor_writes_georeferenced_rasters_and_detailed_area_statistics(
     repeated = executor.run(_command(inputs), IDEMPOTENCY_KEY)
     assert repeated.reused
     assert repeated.result == outcome.result
+
+
+def test_executor_promotes_only_checksum_validated_prior_artifacts(tmp_path: Path) -> None:
+    manifest_path, data_root, cache_dir, inputs = _write_fixture(tmp_path)
+    store = AnalysisArtifactStore(tmp_path / "outputs")
+    executor = AnalysisExecutor(
+        manifest_path,
+        data_root=data_root,
+        cache_dir=cache_dir,
+        artifact_store=store,
+    )
+    source = executor.run(_command(inputs), IDEMPOTENCY_KEY).result
+
+    promoted = executor.run(
+        _command(inputs, attempt=2, reuse_from_attempt=1),
+        UUID("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"),
+    )
+
+    assert promoted.reused
+    assert promoted.result.attempt == 2
+    assert {artifact.attempt for artifact in promoted.result.artifacts} == {2}
+    assert {
+        artifact.artifact_type: artifact.checksum_sha256 for artifact in promoted.result.artifacts
+    } == {artifact.artifact_type: artifact.checksum_sha256 for artifact in source.artifacts}
+
+    source_path = store.final_directory(TASK_ID, 1) / "ndvi_before.tif"
+    with source_path.open("r+b") as stream:
+        first_byte = stream.read(1)
+        stream.seek(0)
+        stream.write(bytes([first_byte[0] ^ 0xFF]))
+    with pytest.raises(ArtifactIntegrityError, match="checksum"):
+        executor.run(
+            _command(inputs, attempt=3, reuse_from_attempt=1),
+            UUID("ffffffff-ffff-4fff-8fff-ffffffffffff"),
+        )
 
 
 def test_executor_rejects_stale_input_checksum_without_publishing(tmp_path: Path) -> None:

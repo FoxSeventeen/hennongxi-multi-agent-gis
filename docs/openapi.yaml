@@ -582,6 +582,12 @@ components:
             $ref: '#/components/schemas/DataAssetRef'
           type: array
           title: Inputs
+        reuse_from_attempt:
+          anyOf:
+          - type: integer
+            minimum: 1.0
+          - type: 'null'
+          title: Reuse From Attempt
       additionalProperties: false
       type: object
       required:
@@ -1269,6 +1275,12 @@ components:
           type: integer
           minimum: 0.0
           title: Analysis Elapsed Ms
+        reuse_from_attempt:
+          anyOf:
+          - type: integer
+            minimum: 1.0
+          - type: 'null'
+          title: Reuse From Attempt
       additionalProperties: false
       type: object
       required:

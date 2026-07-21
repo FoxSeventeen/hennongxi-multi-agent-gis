@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import UTC, datetime
 from pathlib import Path
-from uuid import UUID
+from uuid import UUID, uuid5
 
 import pytest
 from hennongxi_contracts import (
+    ArtifactRef,
+    ArtifactStatus,
+    ArtifactType,
     QualityConclusion,
     QualityEvaluateCommand,
     QualityMetrics,
@@ -17,20 +21,28 @@ from hennongxi_quality_agent.artifacts import (
     QualityArtifactIntegrityError,
     QualityArtifactStore,
 )
+from hennongxi_quality_agent.execution import QualityExecutor
 
 TASK_ID = UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
 CORRELATION_ID = UUID("cccccccc-cccc-4ccc-8ccc-cccccccccccc")
 IDEMPOTENCY_KEY = UUID("dddddddd-dddd-4ddd-8ddd-dddddddddddd")
+SHA256 = "a" * 64
 
 
-def _command() -> QualityEvaluateCommand:
+def _command(
+    *,
+    attempt: int = 1,
+    artifacts: tuple[ArtifactRef, ...] = (),
+    reuse_from_attempt: int | None = None,
+) -> QualityEvaluateCommand:
     return QualityEvaluateCommand(
         task_id=TASK_ID,
         step_id="evaluate_quality",
-        attempt=1,
+        attempt=attempt,
         correlation_id=CORRELATION_ID,
-        artifacts=(),
+        artifacts=artifacts,
         analysis_elapsed_ms=1250,
+        reuse_from_attempt=reuse_from_attempt,
     )
 
 
@@ -54,6 +66,38 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _analysis_artifacts(attempt: int) -> tuple[ArtifactRef, ...]:
+    return tuple(
+        ArtifactRef(
+            artifact_id=uuid5(TASK_ID, f"{attempt}:{artifact_type.value}"),
+            task_id=TASK_ID,
+            attempt=attempt,
+            artifact_type=artifact_type,
+            status=ArtifactStatus.COMPLETE,
+            media_type=(
+                "application/json"
+                if artifact_type is ArtifactType.AREA_STATISTICS
+                else "image/tiff; application=geotiff"
+            ),
+            created_at=datetime(2026, 7, 21, tzinfo=UTC),
+            checksum_sha256=SHA256,
+            byte_size=1,
+        )
+        for artifact_type in (
+            ArtifactType.NDVI_BEFORE,
+            ArtifactType.NDVI_AFTER,
+            ArtifactType.NDVI_DIFFERENCE,
+            ArtifactType.CHANGE_CLASSIFICATION,
+            ArtifactType.AREA_STATISTICS,
+        )
+    )
+
+
+class _StubEvaluator:
+    def evaluate(self, _command: QualityEvaluateCommand) -> QualityMetrics:
+        return _metrics()
+
+
 def test_store_atomically_publishes_and_reuses_a_verified_report(tmp_path: Path) -> None:
     store = QualityArtifactStore(tmp_path / "quality-reports")
     command = _command()
@@ -72,6 +116,46 @@ def test_store_atomically_publishes_and_reuses_a_verified_report(tmp_path: Path)
 
     with store.session(TASK_ID, 1, IDEMPOTENCY_KEY) as repeated:
         assert repeated.existing_result == result
+
+
+def test_executor_promotes_only_a_verified_prior_quality_result(tmp_path: Path) -> None:
+    store = QualityArtifactStore(tmp_path / "quality-reports")
+    with store.session(TASK_ID, 1, IDEMPOTENCY_KEY) as session:
+        source = session.publish(_command(), _metrics())
+    executor = QualityExecutor(
+        tmp_path / "missing-manifest.json",
+        analysis_artifact_root=tmp_path / "missing-analysis",
+        report_store=store,
+    )
+    executor._evaluator = _StubEvaluator()  # type: ignore[assignment]
+    command = _command(
+        attempt=2,
+        artifacts=_analysis_artifacts(2),
+        reuse_from_attempt=1,
+    )
+
+    promoted = executor.run(
+        command,
+        UUID("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"),
+    )
+
+    assert promoted.reused
+    assert promoted.result.attempt == 2
+    assert promoted.result.metrics == source.metrics
+    assert promoted.result.artifact.attempt == 2
+
+    source_report = store.final_directory(TASK_ID, 1) / "quality_report.json"
+    with source_report.open("ab") as stream:
+        stream.write(b"tampered")
+    with pytest.raises(QualityArtifactIntegrityError, match="quality report"):
+        executor.run(
+            _command(
+                attempt=3,
+                artifacts=_analysis_artifacts(3),
+                reuse_from_attempt=1,
+            ),
+            UUID("ffffffff-ffff-4fff-8fff-ffffffffffff"),
+        )
 
 
 def test_store_rejects_a_different_idempotency_key_for_the_same_attempt(

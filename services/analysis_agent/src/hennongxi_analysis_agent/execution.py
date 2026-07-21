@@ -98,6 +98,16 @@ class AnalysisExecutor:
 
             started = perf_counter()
             inputs = self._resolve_inputs(command.inputs)
+            if command.reuse_from_attempt is not None:
+                return AnalysisOutcome(
+                    result=self._artifact_store.promote(
+                        session,
+                        source_attempt=command.reuse_from_attempt,
+                        correlation_id=command.correlation_id,
+                        created_at=datetime.now(UTC),
+                    ),
+                    reused=True,
+                )
             geometries = _load_geometries(inputs.boundary_path)
             before = self._calculate_ndvi(
                 red_path=inputs.raster_paths[LogicalDatasetId.BEFORE_RED],

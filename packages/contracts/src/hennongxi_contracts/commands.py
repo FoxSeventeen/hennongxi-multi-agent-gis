@@ -105,6 +105,7 @@ class DataPrepareResult(ContractModel):
 
 class AnalysisRunCommand(InternalCommand):
     inputs: tuple[DataAssetRef, ...]
+    reuse_from_attempt: int | None = Field(default=None, ge=1)
 
     @model_validator(mode="after")
     def require_complete_inputs(self) -> Self:
@@ -113,6 +114,8 @@ class AnalysisRunCommand(InternalCommand):
         ids = tuple(asset.dataset_id for asset in self.inputs)
         if len(ids) != len(REQUIRED_DATASET_IDS) or set(ids) != REQUIRED_DATASET_IDS:
             raise ValueError("inputs must contain exactly the required logical dataset IDs")
+        if self.reuse_from_attempt is not None and self.reuse_from_attempt >= self.attempt:
+            raise ValueError("reuse_from_attempt must identify an earlier attempt")
         return self
 
 
@@ -207,6 +210,7 @@ class QualityMetrics(ContractModel):
 class QualityEvaluateCommand(InternalCommand):
     artifacts: tuple[ArtifactRef, ...]
     analysis_elapsed_ms: int = Field(ge=0)
+    reuse_from_attempt: int | None = Field(default=None, ge=1)
 
     @model_validator(mode="after")
     def require_artifact_scope(self) -> Self:
@@ -220,6 +224,14 @@ class QualityEvaluateCommand(InternalCommand):
             raise ValueError("quality command accepts only supported analysis artifact types")
         if len(set(artifact_types)) != len(artifact_types):
             raise ValueError("quality command requires unique supported analysis artifact types")
+        if self.reuse_from_attempt is not None and self.reuse_from_attempt >= self.attempt:
+            raise ValueError("reuse_from_attempt must identify an earlier attempt")
+        if self.reuse_from_attempt is not None and (
+            len(artifact_types) != len(QUALITY_INPUT_ARTIFACT_TYPES)
+            or set(artifact_types) != QUALITY_INPUT_ARTIFACT_TYPES
+            or any(artifact.status is not ArtifactStatus.COMPLETE for artifact in self.artifacts)
+        ):
+            raise ValueError("quality reuse requires the complete current analysis artifact set")
         return self
 
 

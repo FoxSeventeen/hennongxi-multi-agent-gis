@@ -12,6 +12,7 @@ from hennongxi_contracts import (
     ArtifactRef,
     ArtifactStatus,
     ArtifactType,
+    DataAssetRef,
     DataPrepareCommand,
     ExecutionPlan,
     LogicalDatasetId,
@@ -391,6 +392,49 @@ def test_analysis_command_is_scoped_to_the_analysis_step() -> None:
             correlation_id=CORRELATION_ID,
             inputs=(),
         )
+
+
+def test_reuse_commands_require_an_earlier_attempt() -> None:
+    inputs = tuple(
+        DataAssetRef(
+            dataset_id=dataset_id,
+            checksum_sha256=SHA256,
+            byte_size=1,
+        )
+        for dataset_id in LogicalDatasetId
+    )
+    analysis = AnalysisRunCommand(
+        task_id=TASK_ID,
+        step_id="analyze_ndvi_change",
+        attempt=2,
+        correlation_id=CORRELATION_ID,
+        inputs=inputs,
+        reuse_from_attempt=1,
+    )
+    quality = QualityEvaluateCommand(
+        task_id=TASK_ID,
+        step_id="evaluate_quality",
+        attempt=2,
+        correlation_id=CORRELATION_ID,
+        artifacts=tuple(
+            valid_artifact(attempt=2, artifact_type=artifact_type)
+            for artifact_type in (
+                ArtifactType.NDVI_BEFORE,
+                ArtifactType.NDVI_AFTER,
+                ArtifactType.NDVI_DIFFERENCE,
+                ArtifactType.CHANGE_CLASSIFICATION,
+                ArtifactType.AREA_STATISTICS,
+            )
+        ),
+        analysis_elapsed_ms=1,
+        reuse_from_attempt=1,
+    )
+    assert analysis.reuse_from_attempt == quality.reuse_from_attempt == 1
+
+    with pytest.raises(ValidationError, match="earlier attempt"):
+        AnalysisRunCommand.model_validate(analysis.model_dump() | {"reuse_from_attempt": 2})
+    with pytest.raises(ValidationError, match="earlier attempt"):
+        QualityEvaluateCommand.model_validate(quality.model_dump() | {"reuse_from_attempt": 3})
 
 
 def test_analysis_result_requires_elapsed_time_and_complete_artifact_set() -> None:

@@ -9,7 +9,7 @@ from uuid import UUID
 
 from hennongxi_contracts import QualityEvaluateCommand, QualityEvaluateResult
 
-from hennongxi_quality_agent.artifacts import QualityArtifactStore
+from hennongxi_quality_agent.artifacts import QualityArtifactIntegrityError, QualityArtifactStore
 from hennongxi_quality_agent.evaluation import QualityEvaluator
 
 
@@ -44,6 +44,19 @@ class QualityExecutor:
             if session.existing_result is not None:
                 return QualityOutcome(result=session.existing_result, reused=True)
             metrics = self._get_evaluator().evaluate(command)
+            if command.reuse_from_attempt is not None:
+                source = self._report_store.load_verified_result(
+                    command.task_id,
+                    command.reuse_from_attempt,
+                )
+                if source.metrics != metrics:
+                    raise QualityArtifactIntegrityError(
+                        "prior quality result does not match current analysis artifacts"
+                    )
+                return QualityOutcome(
+                    result=session.publish(command, source.metrics),
+                    reused=True,
+                )
             return QualityOutcome(
                 result=session.publish(command, metrics),
                 reused=False,

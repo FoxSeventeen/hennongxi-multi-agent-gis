@@ -205,6 +205,58 @@ class AnalysisArtifactStore:
             byte_size=path.stat().st_size,
         )
 
+    def promote(
+        self,
+        session: ArtifactWriteSession,
+        *,
+        source_attempt: int,
+        correlation_id: UUID,
+        created_at: datetime,
+    ) -> AnalysisRunResult:
+        """Copy one verified prior result into the lock-held current attempt."""
+
+        if source_attempt >= session.attempt:
+            raise ArtifactIntegrityError("analysis reuse source must be an earlier attempt")
+        source_directory = self.final_directory(session.task_id, source_attempt)
+        self._require_safe_directory(source_directory)
+        _, source = self._load_verified(source_directory, session.task_id, source_attempt)
+        for filename in _FILENAMES.values():
+            shutil.copyfile(source_directory / filename, session.staging_directory / filename)
+        result = AnalysisRunResult(
+            task_id=session.task_id,
+            step_id="analyze_ndvi_change",
+            attempt=session.attempt,
+            correlation_id=correlation_id,
+            artifacts=tuple(
+                self.artifact_ref(
+                    session.staging_directory,
+                    task_id=session.task_id,
+                    attempt=session.attempt,
+                    artifact_type=artifact_type,
+                    created_at=created_at,
+                )
+                for artifact_type in ANALYSIS_ARTIFACT_TYPES
+            ),
+            statistics=source.statistics,
+            elapsed_ms=source.elapsed_ms,
+        )
+        session.publish(result)
+        return result
+
+    def _require_safe_directory(self, directory: Path) -> None:
+        root = self._artifact_root.resolve()
+        try:
+            directory.resolve(strict=True).relative_to(root)
+        except (OSError, ValueError) as error:
+            raise ArtifactIntegrityError(
+                "analysis reuse directory is outside artifact storage"
+            ) from error
+        task_directory = directory.parent.parent
+        if any(path.is_symlink() for path in (task_directory, directory.parent, directory)):
+            raise ArtifactIntegrityError("analysis reuse directory cannot contain symlinks")
+        if not directory.is_dir():
+            raise ArtifactIntegrityError("analysis reuse directory is unavailable")
+
     def _load_verified(
         self,
         directory: Path,
@@ -237,7 +289,7 @@ class AnalysisArtifactStore:
         for artifact_type in ANALYSIS_ARTIFACT_TYPES:
             path = directory / _FILENAMES[artifact_type]
             artifact = refs[artifact_type]
-            if not path.is_file() or path.stat().st_size != artifact.byte_size:
+            if path.is_symlink() or not path.is_file() or path.stat().st_size != artifact.byte_size:
                 raise ArtifactIntegrityError("analysis artifact size does not match its metadata")
             if _sha256(path) != artifact.checksum_sha256:
                 raise ArtifactIntegrityError(
