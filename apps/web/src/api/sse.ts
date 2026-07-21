@@ -38,6 +38,9 @@ function consumeCompleteFrames(
   let buffer = initialBuffer;
   let boundary = frameBoundary.exec(buffer);
   while (boundary !== null) {
+    if (boundary.index > MAX_EVENT_BUFFER_CHARACTERS) {
+      throw new Error("SSE event exceeds the safe buffer limit");
+    }
     const frame = buffer.slice(0, boundary.index);
     buffer = buffer.slice(boundary.index + boundary[0].length);
     consumeFrame(frame, onMessage);

@@ -207,4 +207,26 @@ describe("task SSE client", () => {
     expect(error).toBeInstanceOf(MasterApiError);
     expect(error).toMatchObject({ code: "INTERNAL_ERROR", retryable: true });
   });
+
+  it("rejects a complete SSE frame that exceeds the safe buffer limit", async () => {
+    const oversizedEvent = {
+      ...taskEvent(1),
+      message: "超".repeat(262_144),
+    };
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(streamResponse([`id: 1\ndata: ${JSON.stringify(oversizedEvent)}\n\n`]));
+    const client = createMasterClient({ baseUrl, fetcher });
+
+    const error = await client
+      .streamTaskEvents(taskId, {
+        afterSequence: 0,
+        signal: new AbortController().signal,
+        onEvent: vi.fn(),
+      })
+      .catch((reason: unknown) => reason);
+
+    expect(error).toBeInstanceOf(MasterApiError);
+    expect(error).toMatchObject({ code: "INTERNAL_ERROR", retryable: true });
+  });
 });
