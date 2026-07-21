@@ -643,26 +643,28 @@ The critical path is contracts → persistence/events → raster chain → orche
 
 **验收标准：**
 
-- [ ] 地图初始适配完整流域范围；三个计算图层均可独立激活，流域边界始终可见。
-- [ ] 图例、日期、数值/单位、颜色、nodata 透明度和数据归属与 Publisher 元数据一致。
-- [ ] 瓦片缺失或失败时显示可恢复的中文错误，不导致其余工作流界面崩溃或空白。
+- [x] 地图初始适配完整流域范围；三个计算图层均可独立激活，流域边界始终可见。
+- [x] 图例、日期、数值/单位、颜色、nodata 透明度和数据归属与 Publisher 元数据一致。
+- [x] 瓦片缺失或失败时显示可恢复的中文错误，不导致其余工作流界面崩溃或空白。
 
 **验证：**
 
-- [ ] `docker compose run --rm --no-deps web npm test -- --run -t 'map|layer|legend'`
-- [ ] 真实浏览器网络与视觉检查确认瓦片请求、完整边界范围、图层切换和控制台均符合预期。
+- [x] Web 全量测试 35 项、TypeScript、ESLint 与生产构建通过；地图模型、组件和完整边界均有专项测试。
+- [x] 使用真实完成任务 `2b7d6183-d273-4b1f-9d0b-9ab0fa6c74b5` 验证：差值与后期瓦片请求均返回 200，桌面及 390×844 视口视觉正常，浏览器控制台无警告或错误。
 
 **依赖：**T12、T19、T20。
 
-**预计修改文件：**`apps/web/src/features/map/`、任务查询契约/客户端、地图样式与测试，以及 Master 当前发布输出重建。
+**实际修改文件：**`apps/web/src/features/map/`、`apps/web/src/components/MapWorkspace.tsx`、内置完整流域 GeoJSON、地图/应用样式与测试、任务查询/OpenAPI 契约，以及 Master 当前发布输出重建。
+
+**实施提交：**`d8ec9ee`、`1ba8401`、`7575b3f`、`a6f5368`。
 
 **工作量：**中等。
 
 #### Checkpoint G: Observable user journey
 
-- [ ] T19-T21 tests/lint/types pass and the UI remains usable after refresh and SSE interruption.
-- [ ] A teacher can identify every Agent, the shared task ID, current progress, and the three real computed map layers without reading code.
-- [ ] Browser console and required network requests are clean on the target machine.
+- [x] T19-T21 测试、Lint 和类型检查通过，刷新与 SSE 中断后界面仍可使用。
+- [x] 无需阅读代码即可识别每个 Agent、共享任务编号、当前进度和三个真实计算图层。
+- [x] 目标机器浏览器控制台干净，必需的任务与瓦片网络请求均成功。
 
 ### Phase 8: Results and end-to-end proof
 
