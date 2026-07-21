@@ -1068,6 +1068,168 @@ async def test_worker_claim_is_exclusive_and_expired_lease_can_be_reclaimed(
 
 
 @pytest.mark.asyncio
+async def test_expired_analysis_attempt_is_atomically_failed_and_requeued(
+    repository: TaskRepository,
+    engine: AsyncEngine,
+) -> None:
+    await create_pending_task(repository)
+    original = await repository.claim_next_task(
+        WorkerClaimRequest(worker_id="master-old", claimed_at=NOW, lease_seconds=30)
+    )
+    assert original is not None
+    await repository.transition_task(
+        TransitionCreate(
+            task_id=TASK_ID,
+            attempt=1,
+            step_id="planning",
+            agent=AgentName.MASTER,
+            target_status=TaskStatus.PLANNING,
+            progress=5,
+            message="正在生成计划",
+            elapsed_ms=1,
+            occurred_at=NOW + timedelta(seconds=1),
+        )
+    )
+    await repository.save_plan(plan(), attempt=1)
+    await repository.transition_task(
+        TransitionCreate(
+            task_id=TASK_ID,
+            attempt=1,
+            step_id="prepare_data",
+            agent=AgentName.DATA,
+            target_status=TaskStatus.DATA_PREPARING,
+            progress=10,
+            message="开始准备数据",
+            elapsed_ms=1,
+            occurred_at=NOW + timedelta(seconds=2),
+            step_status=StepStatus.RUNNING,
+            step_progress=0,
+            step_started_at=NOW + timedelta(seconds=2),
+        )
+    )
+    data = DataPrepareResult(
+        task_id=TASK_ID,
+        step_id="prepare_data",
+        attempt=1,
+        correlation_id=CORRELATION_ID,
+        assets=tuple(
+            DataAssetRef(
+                dataset_id=dataset_id,
+                checksum_sha256=SHA256,
+                byte_size=10,
+            )
+            for dataset_id in LogicalDatasetId
+        ),
+    )
+    await repository.transition_task(
+        TransitionCreate(
+            task_id=TASK_ID,
+            attempt=1,
+            step_id="prepare_data",
+            agent=AgentName.DATA,
+            target_status=TaskStatus.ANALYZING,
+            progress=25,
+            message="数据准备完成",
+            elapsed_ms=2,
+            occurred_at=NOW + timedelta(seconds=3),
+            step_status=StepStatus.COMPLETED,
+            step_progress=100,
+            step_completed_at=NOW + timedelta(seconds=3),
+            step_output=data,
+        )
+    )
+    await repository.record_progress(
+        ProgressCreate(
+            task_id=TASK_ID,
+            attempt=1,
+            step_id="analyze_ndvi_change",
+            agent=AgentName.ANALYSIS,
+            target_status=TaskStatus.ANALYZING,
+            progress=30,
+            message="开始分析",
+            elapsed_ms=0,
+            occurred_at=NOW + timedelta(seconds=4),
+            step_status=StepStatus.RUNNING,
+            step_progress=0,
+            step_started_at=NOW + timedelta(seconds=4),
+        )
+    )
+
+    replacement_repository = TaskRepository(engine)
+    replacement = await replacement_repository.claim_next_task(
+        WorkerClaimRequest(
+            worker_id="master-new",
+            claimed_at=NOW + timedelta(seconds=31),
+            lease_seconds=30,
+        )
+    )
+    assert replacement is not None
+    recovered = await replacement_repository.recover_interrupted_attempt(
+        replacement,
+        recovered_at=NOW + timedelta(seconds=31),
+    )
+
+    assert recovered is not None
+    assert recovered.interrupted_attempt == 1
+    assert recovered.retry_attempt == 2
+    assert recovered.resume_from_step_id == "analyze_ndvi_change"
+    task = await repository.get_task(TASK_ID)
+    events = await repository.list_events(TASK_ID)
+    snapshot = await repository.get_recovery_snapshot(TASK_ID, 2)
+    assert task is not None
+    assert task.status is TaskStatus.PENDING
+    assert task.current_attempt == 2
+    assert events[-2].attempt == 1
+    assert events[-2].status is TaskStatus.FAILED
+    assert events[-2].error is not None
+    assert events[-2].error.code is ErrorCode.INTERNAL_ERROR
+    assert events[-1].attempt == 2
+    assert events[-1].status is TaskStatus.PENDING
+    assert snapshot is not None
+    assert snapshot.resume_from_step_id == "analyze_ndvi_change"
+    assert snapshot.data == data
+    assert snapshot.analysis is None
+
+    async with engine.connect() as connection:
+        attempts = (
+            (
+                await connection.execute(
+                    text(
+                        "SELECT attempt, status, resume_from_step_id FROM attempts "
+                        "WHERE task_id = :task_id ORDER BY attempt"
+                    ),
+                    {"task_id": TASK_ID},
+                )
+            )
+            .tuples()
+            .all()
+        )
+        analysis_status = await connection.scalar(
+            text(
+                "SELECT status FROM steps WHERE task_id = :task_id "
+                "AND attempt = 1 AND step_id = 'analyze_ndvi_change'"
+            ),
+            {"task_id": TASK_ID},
+        )
+    assert attempts == [(1, "FAILED", None), (2, "PENDING", "analyze_ndvi_change")]
+    assert analysis_status == "FAILED"
+
+    await replacement_repository.release_claim(
+        replacement,
+        released_at=NOW + timedelta(seconds=32),
+    )
+    next_claim = await repository.claim_next_task(
+        WorkerClaimRequest(
+            worker_id="master-new",
+            claimed_at=NOW + timedelta(seconds=32),
+            lease_seconds=30,
+        )
+    )
+    assert next_claim is not None
+    assert next_claim.attempt == 2
+
+
+@pytest.mark.asyncio
 async def test_concurrent_worker_claims_have_exactly_one_winner(
     repository: TaskRepository,
     engine: AsyncEngine,

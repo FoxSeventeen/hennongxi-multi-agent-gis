@@ -16,6 +16,7 @@ from hennongxi_contracts import (
 from hennongxi_master.llm import LlmPlanningError
 from hennongxi_master.planning import build_builtin_recovery_plan
 from hennongxi_master.repository import (
+    InterruptedRecoveryResult,
     RepositoryConflict,
     WorkerClaim,
     WorkerClaimRequest,
@@ -104,10 +105,18 @@ async def test_planner_preserves_sanitized_failed_call_before_recovery() -> None
 
 
 class _ClaimRepository:
-    def __init__(self, *, claim: WorkerClaim | None = None, lose_lease: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        claim: WorkerClaim | None = None,
+        lose_lease: bool = False,
+        recovery: InterruptedRecoveryResult | None = None,
+    ) -> None:
         self.claim = claim
         self.lose_lease = lose_lease
+        self.recovery = recovery
         self.requests: list[WorkerClaimRequest] = []
+        self.recovery_requests: list[tuple[WorkerClaim, datetime]] = []
         self.renewals: list[WorkerLeaseRenewal] = []
         self.releases: list[tuple[WorkerClaim, datetime]] = []
         self.renewed = asyncio.Event()
@@ -132,6 +141,15 @@ class _ClaimRepository:
                 "lease_expires_at": value.heartbeat_at + timedelta(seconds=value.lease_seconds),
             }
         )
+
+    async def recover_interrupted_attempt(
+        self,
+        claim: WorkerClaim,
+        *,
+        recovered_at: datetime,
+    ) -> InterruptedRecoveryResult | None:
+        self.recovery_requests.append((claim, recovered_at))
+        return self.recovery
 
     async def release_claim(self, claim: WorkerClaim, *, released_at: datetime) -> WorkerClaim:
         self.releases.append((claim, released_at))
@@ -201,6 +219,26 @@ async def test_worker_renews_and_releases_exact_claim_after_completion() -> None
     assert worked is True
     assert runner.calls == [(TASK_ID, 1)]
     assert len(repository.renewals) == 1
+    assert repository.releases == [(claim, NOW)]
+
+
+@pytest.mark.asyncio
+async def test_worker_requeues_interrupted_attempt_before_running_again() -> None:
+    claim = _claim()
+    recovery = InterruptedRecoveryResult(
+        task_id=TASK_ID,
+        interrupted_attempt=1,
+        retry_attempt=2,
+        resume_from_step_id="analyze_ndvi_change",
+    )
+    repository = _ClaimRepository(claim=claim, recovery=recovery)
+    runner = _Runner(repository)
+
+    worked = await OrchestrationWorker(repository, runner, _config(), now=lambda: NOW).run_once()
+
+    assert worked is True
+    assert repository.recovery_requests == [(claim, NOW)]
+    assert runner.calls == []
     assert repository.releases == [(claim, NOW)]
 
 

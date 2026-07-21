@@ -15,6 +15,7 @@ from hennongxi_contracts import (
     ArtifactType,
     CreateTaskRequest,
     DataPrepareResult,
+    ErrorCode,
     ExecutionPlan,
     ModelCallRecord,
     ModelCallStatus,
@@ -52,6 +53,14 @@ class RepositoryInput(BaseModel):
 type StepOutput = (
     DataPrepareResult | AnalysisRunResult | QualityEvaluateResult | PublisherPublishResult
 )
+
+_INTERRUPTED_STEP_BY_STATUS: dict[TaskStatus, str] = {
+    TaskStatus.PLANNING: "planning",
+    TaskStatus.DATA_PREPARING: "prepare_data",
+    TaskStatus.ANALYZING: "analyze_ndvi_change",
+    TaskStatus.QUALITY_CHECKING: "evaluate_quality",
+    TaskStatus.PUBLISHING: "publish_results",
+}
 
 
 class WatershedCreate(RepositoryInput):
@@ -207,6 +216,16 @@ class RecoverySnapshot:
     data: DataPrepareResult | None
     analysis: AnalysisRunResult | None
     quality: QualityEvaluateResult | None
+
+
+@dataclass(frozen=True, slots=True)
+class InterruptedRecoveryResult:
+    """One atomically failed interrupted attempt and its queued successor."""
+
+    task_id: UUID
+    interrupted_attempt: int
+    retry_attempt: int
+    resume_from_step_id: str
 
 
 class RepositoryNotFound(LookupError):
@@ -858,6 +877,162 @@ class TaskRepository:
                 .one_or_none()
             )
         return _worker_claim_from_row(row) if row is not None else None
+
+    async def recover_interrupted_attempt(
+        self,
+        claim: WorkerClaim,
+        *,
+        recovered_at: UtcDateTime,
+    ) -> InterruptedRecoveryResult | None:
+        """Atomically fail a lease-reclaimed active attempt and queue its successor."""
+
+        recovered_at = _UTC_DATETIME.validate_python(recovered_at)
+        async with self._sessions.begin() as session:
+            owned_claim = await session.scalar(
+                text(
+                    "SELECT 1 FROM worker_claims WHERE task_id = :task_id "
+                    "AND attempt = :attempt AND worker_id = :worker_id "
+                    "AND claimed_at = :claimed_at AND released_at IS NULL "
+                    "AND lease_expires_at > :recovered_at FOR UPDATE"
+                ),
+                {
+                    "task_id": claim.task_id,
+                    "attempt": claim.attempt,
+                    "worker_id": claim.worker_id,
+                    "claimed_at": claim.claimed_at,
+                    "recovered_at": recovered_at,
+                },
+            )
+            if owned_claim is None:
+                raise RepositoryConflict("worker claim is stale, released, or expired")
+
+            task = (
+                (
+                    await session.execute(
+                        text(
+                            "SELECT status, progress, current_attempt, correlation_id "
+                            "FROM tasks WHERE task_id = :task_id FOR UPDATE"
+                        ),
+                        {"task_id": claim.task_id},
+                    )
+                )
+                .mappings()
+                .one_or_none()
+            )
+            if task is None:
+                raise RepositoryNotFound("task does not exist")
+            if int(task["current_attempt"]) != claim.attempt:
+                raise RepositoryConflict("worker claim attempt is no longer current")
+
+            status = TaskStatus(str(task["status"]))
+            if status is TaskStatus.PENDING:
+                return None
+            try:
+                resume_from_step_id = _INTERRUPTED_STEP_BY_STATUS[status]
+            except KeyError as error:
+                raise RepositoryConflict("terminal task cannot be recovered") from error
+
+            interruption = StructuredError(
+                code=ErrorCode.INTERNAL_ERROR,
+                message="Master 进程中断，当前尝试已安全终止",
+                retryable=True,
+            )
+            error_json = _json(interruption.model_dump(mode="json"))
+            await session.execute(
+                text(
+                    "UPDATE steps SET status = 'FAILED', completed_at = :recovered_at, "
+                    "error = CAST(:error AS jsonb) WHERE task_id = :task_id "
+                    "AND attempt = :attempt AND step_id = :step_id "
+                    "AND status IN ('PENDING', 'RUNNING')"
+                ),
+                {
+                    "recovered_at": recovered_at,
+                    "error": error_json,
+                    "task_id": claim.task_id,
+                    "attempt": claim.attempt,
+                    "step_id": resume_from_step_id,
+                },
+            )
+            await session.execute(
+                text(
+                    "UPDATE attempts SET status = 'FAILED', completed_at = :recovered_at "
+                    "WHERE task_id = :task_id AND attempt = :attempt"
+                ),
+                {
+                    "recovered_at": recovered_at,
+                    "task_id": claim.task_id,
+                    "attempt": claim.attempt,
+                },
+            )
+            await session.execute(
+                text(
+                    "INSERT INTO events "
+                    "(task_id, attempt, step_id, correlation_id, agent, status, progress, "
+                    "message, elapsed_ms, occurred_at, error) "
+                    "VALUES (:task_id, :attempt, :step_id, :correlation_id, 'master', "
+                    "'FAILED', :progress, :message, 0, :recovered_at, CAST(:error AS jsonb))"
+                ),
+                {
+                    "task_id": claim.task_id,
+                    "attempt": claim.attempt,
+                    "step_id": resume_from_step_id,
+                    "correlation_id": task["correlation_id"],
+                    "progress": int(task["progress"]),
+                    "message": interruption.message,
+                    "recovered_at": recovered_at,
+                    "error": error_json,
+                },
+            )
+
+            retry_attempt = claim.attempt + 1
+            await session.execute(
+                text(
+                    "INSERT INTO attempts "
+                    "(task_id, attempt, status, resume_from_step_id, created_at) "
+                    "VALUES (:task_id, :attempt, 'PENDING', :step_id, :recovered_at)"
+                ),
+                {
+                    "task_id": claim.task_id,
+                    "attempt": retry_attempt,
+                    "step_id": resume_from_step_id,
+                    "recovered_at": recovered_at,
+                },
+            )
+            await session.execute(
+                text(
+                    "UPDATE tasks SET status = 'PENDING', progress = 0, "
+                    "current_attempt = :attempt, last_error = NULL, updated_at = :recovered_at "
+                    "WHERE task_id = :task_id"
+                ),
+                {
+                    "attempt": retry_attempt,
+                    "recovered_at": recovered_at,
+                    "task_id": claim.task_id,
+                },
+            )
+            await session.execute(
+                text(
+                    "INSERT INTO events "
+                    "(task_id, attempt, step_id, correlation_id, agent, status, progress, "
+                    "message, elapsed_ms, occurred_at) "
+                    "VALUES (:task_id, :attempt, :step_id, :correlation_id, 'master', "
+                    "'PENDING', 0, :message, 0, :recovered_at)"
+                ),
+                {
+                    "task_id": claim.task_id,
+                    "attempt": retry_attempt,
+                    "step_id": resume_from_step_id,
+                    "correlation_id": task["correlation_id"],
+                    "message": "已从 Master 中断点创建恢复尝试",
+                    "recovered_at": recovered_at,
+                },
+            )
+            return InterruptedRecoveryResult(
+                task_id=claim.task_id,
+                interrupted_attempt=claim.attempt,
+                retry_attempt=retry_attempt,
+                resume_from_step_id=resume_from_step_id,
+            )
 
     async def renew_claim(
         self,

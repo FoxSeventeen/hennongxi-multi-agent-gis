@@ -17,6 +17,7 @@ from hennongxi_master.llm import LlmPlanningError
 from hennongxi_master.orchestrator import PlanningOutcome
 from hennongxi_master.planning import build_builtin_recovery_plan
 from hennongxi_master.repository import (
+    InterruptedRecoveryResult,
     RepositoryConflict,
     WorkerClaim,
     WorkerClaimRequest,
@@ -74,6 +75,13 @@ class WorkerRepository(Protocol):
         claim: WorkerClaim,
         value: WorkerLeaseRenewal,
     ) -> WorkerClaim: ...
+
+    async def recover_interrupted_attempt(
+        self,
+        claim: WorkerClaim,
+        *,
+        recovered_at: datetime,
+    ) -> InterruptedRecoveryResult | None: ...
 
     async def release_claim(
         self,
@@ -183,6 +191,18 @@ class OrchestrationWorker:
         }
         _LOGGER.info("worker_claim_acquired", **fields)
         try:
+            recovery = await self._repository.recover_interrupted_attempt(
+                claim,
+                recovered_at=self._now(),
+            )
+            if recovery is not None:
+                _LOGGER.warning(
+                    "interrupted_attempt_requeued",
+                    **fields,
+                    retry_attempt=recovery.retry_attempt,
+                    resume_from_step_id=recovery.resume_from_step_id,
+                )
+                return True
             await self._run_claim(claim)
         finally:
             try:
