@@ -6,10 +6,12 @@
 - Repository state at planning time: greenfield; only `.gitignore` and `docs/spec.md` are tracked.
 - Scope of this document: the 10-day MVP only. It does not reopen requirements discovery or add scenarios outside ecological change monitoring.
 - Approval status: approved by the user on 2026-07-19, including the proposed Publisher resource routes below.
+- 2026-07-21 变更提案：在不改变 G2 权威数据、五 Agent 拓扑和公开路由集合的前提下，
+  增加可降级的高德 Web 服务研究区校验；实施前需通过中文门禁 G5。
 
 ## Overview
 
-Build a Chinese, map-first single-page application in which a user submits a natural-language ecological monitoring request, a real configured LLM produces a schema-validated fixed plan, and five independently deployed Agent services execute a traceable NDVI workflow under one `task_id`. PostgreSQL/PostGIS is the durable source of record, Redis carries ordered progress events, the Master Agent owns public workflow APIs and orchestration, and the Publisher Agent serves computed map products and a Chinese PDF. The implementation is organized to fail fast on the highest-risk areas—Apple Silicon containers, authoritative local GIS data, raster math, cross-service contracts, and real LLM compatibility—while leaving the repository runnable at each checkpoint.
+Build a Chinese, map-first single-page application in which a user submits a natural-language ecological monitoring request, a real configured LLM produces a schema-validated fixed plan, and five independently deployed Agent services execute a traceable NDVI workflow under one `task_id`. PostgreSQL/PostGIS is the durable source of record, Redis carries ordered progress events, the Master Agent owns public workflow APIs and orchestration, and the Publisher Agent serves computed map products and a Chinese PDF. An optional backend-only AMap Web Service check grounds the approved study-area name in its expected administrative district without becoming a raster, watershed, basemap, or offline-data dependency. The implementation is organized to fail fast on the highest-risk areas—Apple Silicon containers, authoritative local GIS data, raster math, cross-service contracts, external-service degradation, and real LLM compatibility—while leaving the repository runnable at each checkpoint.
 
 ## Planning assumptions
 
@@ -20,6 +22,10 @@ Build a Chinese, map-first single-page application in which a user submits a nat
 5. The Master starts work outside the request lifecycle and calls every Agent through versioned HTTP endpoints. A single lifespan worker atomically claims runnable rows from PostgreSQL; this durable claim/recovery mechanism avoids adding Celery or another infrastructure service.
 6. Generated rasters and reports use a Docker named volume shared only where required. Services exchange commands and metadata through HTTP; no Agent imports another Agent's application code.
 7. Full container verification requires the installed OrbStack/Docker-compatible backend to be running. Local unit work may proceed without it, but no container checkpoint can be marked complete without an actual `linux/arm64` run.
+8. 高德只作为可选在线校验源：未配置、超时、限流或服务不可用时，不阻断规范中的神农溪
+   离线演示主链，也不得把降级结果标记为“高德已验证”。
+9. 高德返回内容不写入 PostGIS、Redis、成果文件或测试夹具；仅保留本系统生成的提供商无关
+   校验结论、检查时间、耗时和脱敏原因码。高德 Key 仅存在于后端环境变量。
 
 ## Definition of Done
 
@@ -90,6 +96,43 @@ Internal HTTP commands are versioned and contain `task_id`, `step_id`, `attempt`
 - Rio-Tiler reads only allow-listed artifacts to render Web Mercator PNG tiles; MapLibre overlays these tiles with the complete watershed vector boundary.
 - ReportLab embeds a redistributable Chinese font inside the image, and PDF tests verify text extraction plus rendered-page integrity.
 
+### 高德 Web 服务采用边界（G5）
+
+高德最适合补足现有 Master 对自然语言研究区的校验缺口，而不是替换遥感 GIS 主链。
+
+| 现有组件 | 可改进点 | 本轮决定 |
+| --- | --- | --- |
+| Master Agent | 当前任意查询都会绑定固定神农溪流域；增加地名消歧、巴东县行政区匹配和可观测降级 | 接入，且只允许固定 HTTPS 高德域名 |
+| Data Agent | 当前只校验固定本地数据，不知道用户地名是否与神农溪一致 | 受益于 Master 前置门禁；接口、私网隔离和数据清单不变 |
+| Quality Agent | 可把“研究区意图与批准数据一致”作为补充运行证据 | 本轮只通过 Master 事件呈现，不修改四项核心质量模型 |
+| Analysis Agent | NDVI 需要真实红光/近红外栅格和严格网格/坐标处理 | 不接入；高德不作为遥感输入或统计依据 |
+| Publisher/Web | 可解释“请求位置已校验/在线校验已降级” | 复用现有任务事件与结果文案，不新增公开路由，不展示或缓存高德原始数据 |
+| MapLibre 地图 | 高德可提供底图，但与现有 WGS84/Web Mercator 成果存在坐标系和授权边界 | MVP 不替换、不混合底图；继续使用现有 MapLibre 与自有成果瓦片 |
+
+实施约束：
+
+- 使用已验证的 Web 服务 Key，通过地理编码或限定 `adcode` 的 POI 搜索核验
+  “神农溪/巴东县”语义；不加入路径规划、生活 POI、天气或第二个 GIS 场景。
+- 只向高德发送本地允许表中的固定规范名称和巴东县 `adcode`，不发送用户完整提示词、
+  `task_id`、关联标识、影像/成果信息或其他业务数据。
+- 高德采用 GCJ-02。现有 G2 边界、遥感栅格和 Publisher 瓦片仍保持原坐标契约；不得把
+  高德坐标直接与 WGS84 几何叠加或据此修改分析成果。
+- 不抓取、下载、镜像、缓存或持久化高德 POI、行政区边界、底图、坐标或原始响应；测试使用
+  本地假服务构造的自有夹具，真实调用仅是显式、低频、脱敏的冒烟检查。
+- `AMAP_WEB_SERVICE_KEY` 仅注入 Master；固定目标域名、连接/读取超时、响应大小上限、严格
+  JSON 校验和状态码映射。Key、完整 URL 查询串和 `Authorization` 等敏感信息不得进入日志。
+- 明确属于其他地区的请求按既有单场景范围返回中文校验错误；规范内的神农溪请求在高德故障
+  时使用 G2 本地权威数据继续执行，并明确显示“在线位置校验已降级”。
+
+官方依据：
+
+- 地理/逆地理编码：<https://lbs.amap.com/api/webservice/guide/api/georegeo/>
+- POI 搜索及 `adcode` 限定：<https://lbs.amap.com/api/webservice/guide/api/search/>
+- 行政区域查询：<https://lbs.amap.com/api/webservice/guide/api/district/>
+- Web 服务错误码：<https://lbs.amap.com/api/webservice/guide/tools/info/>
+- GCJ-02 与 WGS84 转换说明：<https://lbs.amap.com/api/javascript-api-v2/guide/transform/convertfrom>
+- 高德开放平台服务协议：<https://lbs.amap.com/pages/terms/>
+
 ## Dependency graph and critical path
 
 ```text
@@ -105,10 +148,11 @@ T01 dependency baseline
       -> T14 LLM adapter -> T15 public task API
           -> T16 orchestration -> T17 SSE -> T18 retry/recovery
               -> T19 Web shell -> T20 timeline -> T21 map -> T22 results/retry UI
-                  -> T23 contract/integration suite -> T24 Compose/E2E
-                      -> T25 hardening -> T26 rehearsal/handoff
+                  -> T23 AMap adapter -> T24 study-area grounding
+                      -> T25 contract/integration suite -> T26 Compose/E2E
+                          -> T27 hardening -> T28 rehearsal/handoff
 
-T05 authoritative data/cache feeds T08, T09, T23, T24, and T26.
+T05 authoritative data/cache feeds T08, T09, T24-T26, and T28.
 T04 Compose topology feeds every container-level checkpoint from T10 onward.
 ```
 
@@ -126,8 +170,8 @@ The critical path is contracts → persistence/events → raster chain → orche
 | 6 | T16-T18 | End-to-end orchestration, live events, honest failure/retry |
 | 7 | T19-T20 | Chinese task/readiness UI and live Agent timeline |
 | 8 | T21-T22 | Interactive map, metrics, downloads, retry UX |
-| 9 | T23-T25 | Full-chain tests, Compose browser journey, hardening |
-| 10 | T26 | Real-LLM/data rehearsal and reproducible handoff |
+| 9 | T23-T25 | 高德适配与研究区校验、确定性全链契约测试 |
+| 10 | T26-T28 | Compose 浏览器旅程、加固、真实演练与可复现交付 |
 
 ## Detailed task list
 
@@ -240,7 +284,7 @@ The critical path is contracts → persistence/events → raster chain → orche
 - [x] Manifest schema and checksum/preflight tests pass.
 - [x] A GIS inspection command confirms readable CRS, bounds, band mapping, and watershed overlap for all four inputs.
 
-**Dependencies:** T01. Blocks T08, T09, T23, T24, and T26.
+**Dependencies:** T01. Blocks T08, T09, T24-T26, and T28.
 
 **Files likely touched:** `data/manifest.json`, `data/boundaries/`, `data/samples/README.md`, `scripts/data_preflight.py`, tests.
 
@@ -723,140 +767,217 @@ The critical path is contracts → persistence/events → raster chain → orche
   请求干净。
 - [x] 无需阅读代码即可理解任务、Agent 链、地图、质量、失败、重试和任务绑定报告。
 
-#### Task 23: Prove contracts and the deterministic full Agent chain
+### 阶段 9：高德位置校验与全链证明
 
-**Description:** Add cross-service contract tests and a small generated real-raster fixture that runs Data → Analysis → Quality → Publisher through Master with a local fake LLM. Assert durable state, events, artifacts, spatial outputs, and report content.
+#### 任务 23：建立安全、可降级的高德 Web 服务适配器
 
-**Acceptance criteria:**
+**说明：**在 Master 内建立后端专用的高德 Web 服务客户端和配置边界。只调用固定
+`https://restapi.amap.com` 的地理编码/POI 搜索能力，严格解析 `status`、`info`、
+`infocode` 和最小匹配字段；本任务先证明适配器，不改变任务状态机或公开路由。
 
-- [ ] Every internal/public request and response validates against the shared versioned schemas/OpenAPI with no duplicated divergent models.
-- [ ] The deterministic chain reaches `COMPLETED` with mathematically expected raster/statistical/quality/report results and one traceable task ID.
-- [ ] Representative corrupt data, illegal LLM plan, unreachable Agent, and partial artifact cases end in the documented failure state.
+**验收标准：**
 
-**Verification:**
+- [ ] `AMAP_WEB_SERVICE_KEY` 仅注入 Master；未配置时返回明确的可选能力状态，不把 Key、
+  完整查询串或原始响应写入日志、数据库和错误响应。
+- [ ] 客户端固定 HTTPS 目标、限制连接/读取超时和最大响应体，拒绝重定向、非 JSON、缺失
+  必需字段与自相矛盾的响应；允许忽略有界的新增字段，并把 `10000`、密钥错误、无权限、
+  日限额、频率限制和服务繁忙映射为提供商无关结果。
+- [ ] 生产代码不缓存高德数据；测试只使用本地假服务和自有夹具，显式真实冒烟只输出脱敏
+  状态与匹配数量。
+
+**验证：**
+
+- [ ] `docker compose run --rm master pytest services/master/tests/test_amap.py -q`
+- [ ] 假服务覆盖成功、零结果、多结果、认证、限流、超时、重定向、超大响应、畸形 JSON 和
+  密钥脱敏；显式真实冒烟返回 `infocode=10000`，且 Git/日志中没有密钥。
+
+**依赖：**T01、T03、T14；门禁 G5。
+
+**预计修改文件：**Master 高德适配器及测试、`.env.example`、`docker-compose.yml`、
+`docs/development.md`。
+
+**工作量：**中等；配置与客户端总计控制在 5 个文件范围内。
+
+#### 任务 24：把研究区地名校验接入 Master 规划流程
+
+**说明：**在 LLM 规划前先用本地允许别名识别规范内的神农溪任务，再用 T23 的在线适配器
+对巴东县范围进行可选交叉校验。只向高德发送固定规范名称与 `adcode`；系统仅持久化本系统
+生成的 `VERIFIED`、`DEGRADED`、`REJECTED` 结论、检查时间、耗时和脱敏原因码；Data Agent
+仍只接收批准的数据集逻辑标识。
+
+**验收标准：**
+
+- [ ] 神农溪/巴东县规范内查询在匹配成功时产生可追踪的“在线位置校验通过”事件，随后仍使用
+  G2 流域和影像；高德结果不能改变边界、栅格、日期或计算参数。
+- [ ] 明确指向其他地区的请求在创建计算任务前收到中文范围错误，不再被静默绑定到神农溪；
+  模糊查询不得伪装成已验证。
+- [ ] 未配置、超时、限流或高德故障时，规范内查询按 G2 本地权威数据继续，并产生“在线位置
+  校验已降级”证据；既有公开路由、状态序列和重试语义保持不变。
+
+**验证：**
+
+- [ ] Master 规划/编排定向测试覆盖验证、拒绝、降级、重试和重启重建，且旧任务响应仍通过
+  OpenAPI/共享契约校验。
+- [ ] 真实 Compose 中分别完成一次高德可用和一次断网/限流降级任务；两者的遥感成果一致，
+  但位置校验证据如实不同。
+
+**依赖：**T05、T15-T18、T23。
+
+**预计修改文件：**Master 研究区解析/规划/编排模块及其测试；不新增公共路由和数据库迁移。
+
+**工作量：**中等。
+
+#### 检查点 H1：位置校验边界
+
+- [ ] T23-T24 的单元、契约、类型和 Compose 定向验证通过。
+- [ ] 高德 Key 只存在于忽略的本地环境文件和 Master 进程，浏览器、日志、PostGIS、Redis、
+  报告与 Git 均不包含密钥或高德原始响应。
+- [ ] 同一 G2 数据在高德可用与降级两种情况下产生相同的分析/质量成果；仅校验证据不同。
+
+#### 任务 25：证明契约和确定性完整 Agent 链
+
+**说明：**增加跨服务契约测试和小型真实栅格夹具，以本地假 LLM 与假高德服务，经 Master
+运行 Data → Analysis → Quality → Publisher，断言持久状态、事件、成果、空间输出和报告内容。
+
+**验收标准：**
+
+- [ ] 所有内部/公开请求与响应都通过同一套共享版本化 Schema/OpenAPI，没有重复且漂移的模型。
+- [ ] 高德验证和降级两条确定性链都到达预期终态；完成链的栅格、统计、质量和报告结果在同一
+  `task_id` 下数学可复现。
+- [ ] 损坏数据、非法 LLM 计划、非目标地区、不可达 Agent 和部分成果均进入规定失败/拒绝状态，
+  不产生虚假成功。
+
+**验证：**
 
 - [ ] `docker compose run --rm master pytest tests/integration -q`
-- [ ] Backend unit/contract/integration suite and critical branch-coverage threshold pass together.
+- [ ] 后端单元、契约、集成测试与关键分支覆盖门槛一起通过。
 
-**Dependencies:** T08, T10-T18.
+**依赖：**T08、T10-T18、T24。
 
-**Files likely touched:** `tests/integration/`, shared fixture factories, fake LLM server.
+**预计修改文件：**`tests/integration/`、共享夹具工厂、假 LLM/高德服务。
 
-**Estimated scope:** M.
+**工作量：**中等。
 
-#### Task 24: Automate the critical Compose browser journey
+#### 任务 26：自动化关键 Compose 浏览器旅程
 
-**Description:** Use Playwright against the complete Compose stack to verify readiness, task creation, plan/timeline progress, map layers, metrics, report download, refresh survival, forced failure, and retry. Keep selectors stable and test data deterministic.
+**说明：**使用 Playwright 对完整 Compose 栈验证就绪、任务创建、位置校验证据、计划/时间线、
+地图图层、指标、报告、刷新、强制失败和重试；选择器稳定，测试数据确定。
 
-**Acceptance criteria:**
+**验收标准：**
 
-- [ ] One command builds/starts the full stack and runs the critical Chinese demonstration journey without manual backend intervention.
-- [ ] The browser test asserts the complete watershed, three computed raster layers, required metrics, matching report/task ID, refresh recovery, and failure/retry.
-- [ ] Failure artifacts (screenshots, trace, logs) are retained for diagnosis while successful generated outputs remain ignored by Git.
+- [ ] 一个命令可构建/启动完整栈并运行中文答辩主旅程，无需人工后端干预。
+- [ ] 浏览器断言完整流域、三个计算图层、必需指标、匹配报告/任务 ID、刷新恢复、失败/重试，
+  以及高德“验证通过/已降级”两种真实文案。
+- [ ] 失败截图、trace 和日志可供诊断；成功生成物保持 Git 忽略，测试不访问真实高德服务。
 
-**Verification:**
+**验证：**
 
 - [ ] `docker compose run --rm e2e npm test`
-- [ ] Fresh-volume run and warm-cache rerun both pass on the target Apple Silicon machine.
+- [ ] 在目标 Apple Silicon 机器上通过全新 volume 和温缓存复跑。
 
-**Dependencies:** T04, T05, T19-T23.
+**依赖：**T04-T05、T19-T22、T25；门禁 G4。
 
-**Files likely touched:** `tests/e2e/`, e2e package/config, Compose e2e service.
+**预计修改文件：**`tests/e2e/`、E2E 包/配置、Compose E2E 服务。
 
-**Estimated scope:** M.
+**工作量：**中等。
 
-#### Checkpoint H: Acceptance flow
+#### 检查点 H2：可接受用户流程
 
-- [ ] T22-T24 verification passes from the repository root with documented commands.
-- [ ] All 12 specification success criteria have automated evidence or a named manual rehearsal check.
-- [ ] Fresh and warm runs leave no secret/raw/generated artifacts staged for Git.
+- [ ] T22-T26 的验证可从仓库根目录以文档命令运行。
+- [ ] 规格的 12 项成功标准均有自动化证据或具名人工演练检查。
+- [ ] 新鲜与温缓存运行均不把密钥、原始数据、高德响应或生成成果加入 Git。
 
-### Phase 9: Hardening and delivery
+### 阶段 10：加固与交付
 
-#### Task 25: Run security, observability, and operational hardening
+#### 任务 27：执行安全、可观测性和运行加固
 
-**Description:** Review the complete implementation for input/path/secret exposure, SSRF-like LLM configuration risks, cross-task artifact access, timeouts/resource limits, correlation coverage, health semantics, and useful failure diagnostics. Fix only MVP blockers found by the review.
+**说明：**审查完整实现的输入/路径/密钥、外部服务 SSRF、跨任务成果访问、超时/资源限制、
+关联信息、健康语义、高德条款边界和故障诊断；只修复 MVP 阻断项。
 
-**Acceptance criteria:**
+**验收标准：**
 
-- [ ] Negative tests cover task input, LLM output, internal payloads, artifact/tiles paths, cross-task access, timeouts, and secret redaction.
-- [ ] Structured logs allow one task/attempt to be traced across all containers without credentials, raw prompts if sensitive, or private data URLs.
-- [ ] Health/readiness, container limits/timeouts, and error messages distinguish operator-actionable failures from user errors.
+- [ ] 负向测试覆盖任务输入、LLM/高德输出、内部载荷、成果/瓦片路径、跨任务访问、超时、
+  重定向、响应上限和密钥脱敏。
+- [ ] 结构化日志可跨容器追踪一个任务/尝试，但不含凭据、敏感原始提示、私有数据 URL 或
+  高德完整请求/响应。
+- [ ] 健康/就绪、容器限制和错误消息可区分用户错误、必需依赖故障与高德可选增强降级；人工
+  复核确认没有抓取、缓存、镜像或持久化高德相关内容。
 
-**Verification:**
+**验证：**
 
-- [ ] Full lint/type/unit/contract/integration/browser suite passes after hardening.
-- [ ] Manual secret scan and cross-task/path traversal test report no leak/access.
+- [ ] 加固后全量 lint、类型、单元、契约、集成和浏览器测试通过。
+- [ ] 人工密钥扫描、跨任务/目录穿越测试和高德数据留存检查均无泄漏或越权。
 
-**Dependencies:** T24.
+**依赖：**T26。
 
-**Files likely touched:** focused service/Web modules found by review, security tests, operational docs.
+**预计修改文件：**审查发现的聚焦服务/Web 模块、安全测试和运行文档；无关发现分别提交。
 
-**Estimated scope:** M; split each unrelated finding into its own atomic commit.
+**工作量：**中等。
 
-#### Task 26: Rehearse the real demonstration and finish handoff documentation
+#### 任务 28：演练真实答辩并完成交付文档
 
-**Description:** On the target machine, use the approved cached real data and configured real LLM for a recorded full-stack rehearsal, then document exact setup, checks, demo script, known limitations, backup/recovery behavior, and teardown without deleting cached data.
+**说明：**在目标机器使用批准的缓存真实数据、真实 LLM 和显式高德冒烟完成一次记录化全栈
+演练，再关闭高德网络完成一次降级复跑；记录配置、检查、演示、限制、恢复和非破坏性停止。
 
-**Acceptance criteria:**
+**验收标准：**
 
-- [ ] One real-LLM, real-raster UI run satisfies all 12 success criteria with recorded task ID, timings, checksums, screenshots/log references, and downloadable Chinese report.
-- [ ] The run succeeds after page refresh, demonstrates one forced failure/retry, and needs no network imagery download during the presentation.
-- [ ] README/operator/demo documentation lets a new operator configure, preflight, start, verify, present, stop, and troubleshoot the system without secret leakage.
+- [ ] 一次真实 LLM/真实栅格 UI 运行满足 12 项成功标准，并记录任务 ID、耗时、校验和、
+  截图/日志引用、位置校验状态和中文报告。
+- [ ] 页面刷新与强制失败/重试成功；关闭高德网络后规范内任务仍可用缓存数据完成，答辩时
+  不需要下载影像，也不把高德作为必需依赖。
+- [ ] README/运维/演示文档让新操作员能安全配置、预检、启动、验证、演示、停止和排障，
+  并明确 Key 轮换、高德额度/状态码和 GCJ-02/WGS84 限制。
 
-**Verification:**
+**验证：**
 
-- [ ] Run every command in `docs/demo-runbook.md` on the target machine, including cold start, readiness, smoke/E2E, real workflow, retry, and non-destructive shutdown.
-- [ ] `git status --short` contains only intended source/docs changes; raw data, `.env`, outputs, reports, and logs remain ignored.
+- [ ] 在目标机器执行 `docs/demo-runbook.md` 全部命令，包括冷启动、就绪、冒烟/E2E、真实
+  工作流、高德降级、重试和非破坏性停止。
+- [ ] `git status --short` 只含预期源码/文档；原始数据、`.env*`、高德响应、输出、报告和
+  日志保持忽略。
 
-**Dependencies:** T05, T14, T25; requires supplied working LLM configuration and running container backend.
+**依赖：**T05、T14、T27；需要有效 LLM 配置、可轮换的高德 Web 服务 Key 和运行中的容器后端。
 
-**Files likely touched:** `README.md`, `docs/setup.md`, `docs/demo-runbook.md`, `docs/verification.md`.
+**预计修改文件：**`README.md`、`docs/setup.md`、`docs/demo-runbook.md`、
+`docs/verification.md`。
 
-**Estimated scope:** M.
+**工作量：**中等。
 
-#### Final checkpoint: Ready for review and demonstration
+#### 最终检查点：可评审、可答辩
 
-- [ ] All specification acceptance criteria and this plan's Definition of Done are satisfied.
-- [ ] `docker compose up --build` and every documented one-command check pass on the target machine.
-- [ ] The real rehearsal evidence is reviewed, rollback/retry instructions are known, and no external download is needed during the demonstration.
+- [ ] 规格验收标准和本计划 Definition of Done 全部满足。
+- [ ] `docker compose up --build` 与所有文档化一键检查在目标机器通过。
+- [ ] 真实演练证据已复核，回滚/重试/高德降级说明明确，演示不依赖外部影像下载。
 
-## Parallelization opportunities
+## 可并行机会
 
-- After T02 freezes contracts, T05 data-source work, T07 event-store work, T09 raster pure logic, and the initial T19 Web shell can proceed independently if changes to shared schemas are coordinated first.
-- After T10 publishes stable artifact metadata, T11 quality evaluation and T12 tile rendering can proceed in parallel.
-- After T17 fixes event/query semantics, T20 timeline work can proceed while T13 report generation is finalized.
-- T23 contract/integration work and T24 E2E scaffolding can be prepared in parallel, but neither checkpoint passes before the complete chain is available.
-- Migrations, shared contracts, state transitions, route changes, and artifact metadata changes are sequential coordination points and must not be independently redefined.
+- T23 的假服务/客户端测试可与 T25 的确定性栅格夹具准备并行，但 T25 的完整链必须等待 T24。
+- T26 的 Playwright 基础配置可提前准备，但高德位置文案断言必须等待 T24 契约稳定。
+- T27 必须在 T26 之后做最终审查；共享契约、状态机、路由和成果元数据不得并行重复定义。
 
-## Risks and mitigations
+## 风险与缓解
 
-| Risk | Impact | Mitigation / earliest proving task |
+| 风险 | 影响 | 缓解措施 / 最早验证任务 |
 | --- | --- | --- |
-| Exact LLM provider/model remains unknown | High | Provider-compatible HTTP adapter, fake-server matrix, readiness error, and opt-in real smoke in T14; real call required in T26 |
-| Authoritative imagery/boundary unavailable, mismatched, or too large | High | Verify source/license/coverage/checksums and cache procedure in T05 before Agent integration |
-| GIS images fail or build slowly on Apple Silicon | High | Pin verified `linux/arm64` bases in T01 and run actual Compose smoke in T04 |
-| Raster grids/CRS differ and produce misleading change | High | Explicit reprojection/alignment contract and mismatch tests in T09; independent range/coverage checks in T11 |
-| SSE gaps or duplicate progress after reconnect | Medium | Durable monotonic events, `Last-Event-ID`, Redis-loss tests in T07/T17, HTTP polling fallback in T20 |
-| In-process shortcuts undermine the distributed claim | High | Independent containers, no cross-Agent imports, service-boundary spies in T08/T16/T23 |
-| Partial artifacts look successful | High | Atomic writes, checksum/completeness gates, and no `COMPLETED` until T10/T11/T16 conditions pass |
-| Chinese PDF glyph/layout failures | Medium | Bundle licensed font and verify extraction plus rendered pages in T13 |
-| Retry duplicates work or hides history | High | Immutable attempts, idempotency, safe checkpoints, checksum validation, and forced-failure tests in T18 |
-| Demo depends on network or cold downloads | High | Ignored local cache, preflight, warm run, and recorded offline-data rehearsal in T05/T24/T26 |
-| Ten-day schedule slips | High | S/M tasks, checkpoint every three tasks, high-risk work by day 4, and defer all explicitly out-of-scope features |
+| 高德服务超时、限流或现场无网 | 高 | T23 严格超时/状态码，T24 可观测降级，T28 断网复跑；不设为核心就绪阻塞项 |
+| 高德 Key 泄漏到浏览器、日志或 Git | 高 | Key 仅注入 Master；T23 脱敏测试、T27 密钥扫描、忽略 `.env*` 并在交付前轮换 |
+| GCJ-02 与 WGS84 混用导致错位 | 高 | 不替换 MapLibre、不直接叠加高德坐标；G2 几何与分析契约不变，T27 人工复核 |
+| 高德数据留存或展示超出官方授权 | 高 | 不缓存/持久化/下载原始响应、边界、POI 或底图；只保存本系统的脱敏结论，T27 条款边界检查 |
+| 地名多结果导致错误匹配 | 中 | 本地允许别名先行，POI 搜索限定巴东县 `adcode`，多结果不伪装为验证通过，T24 覆盖歧义测试 |
+| 精确 LLM 提供商/模型变化 | 高 | T14 的兼容 HTTP 适配器与假服务矩阵；T28 必须真实调用 |
+| 栅格网格/CRS 不同导致错误变化 | 高 | T09 显式对齐契约、T11 独立范围/覆盖检查；高德不参与分析输入 |
+| SSE 断线后缺口或重复 | 中 | T07/T17 持久序列与 Redis 丢失测试，T20 轮询降级，T26 浏览器复核 |
+| 部分成果被展示为成功 | 高 | T10/T11/T16 原子成果与完成门槛，T25 失败矩阵 |
+| 重试重复计算或隐藏历史 | 高 | T18 不可变尝试、安全检查点与校验和；T26 强制失败/重试 |
+| 十天计划因新增接入延期 | 高 | T23/T24 各自保持中等以下；不加入高德 JS API、底图、路线、天气或生活 POI；G5 未通过时不实施 |
 
 ## 审批事项与外部阻塞项
 
-以下事项不是重新讨论已批准产品范围的理由，而是规格中已经预留的实施门禁：
+1. **G1 已批准：**Publisher 两个只读瓦片/下载路由；新增公开路由仍需单独审批。
+2. **G2 已批准：**权威流域、2019-08-19 与 2024-08-12 影像及反射率修正；高德不得替代这些来源。
+3. **G3 已满足：**大模型配置仅用于后端真实冒烟与演练，不进入 Git 或浏览器。
+4. **G4 已满足：**容器后端在 Compose/浏览器验证前运行。
+5. **G5 待批准：**按 `tasks/approvals/G5-amap-web-service-integration.md` 接入后端专用、可降级的
+   高德研究区校验；不新增公开路由、不替换 MapLibre、不缓存高德数据、不扩展第二 GIS 场景。
 
-1. **批准 Publisher 资源契约：**批准本计划提出的两个只读瓦片/下载路由。任何不同或
-   新增的公开路由都需要单独审批。
-2. **已批准选定的权威数据源：**G2 及其 2024-08-12 后期影像变更已于 2026-07-19
-   获批；T05 仍必须记录准确的来源、许可、获取日期、覆盖率和校验和，数据才能被视为
-   最终来源。
-3. **提供大模型运行配置：**`LLM_API_KEY`、`LLM_BASE_URL`、`LLM_MODEL` 只在 T14
-   可选真实冒烟测试和 T26 验收演练中需要；不得提交到 Git，也不得传给浏览器。
-4. **启动容器后端：**执行 T04 及后续 Compose 验证前，OrbStack/Docker 必须运行。
-
-不得通过静默扩大范围来处理其他开放问题。若要增加第二个 GIS 场景、提供商专用 SDK、
-新增基础设施服务、在审批后重设计模式，或增加公开工作流 API，必须停止实施并请求审批。
+不得通过静默扩大范围来处理其他开放问题。若要增加第二个 GIS 场景、高德 JS API/底图、
+提供商专用 SDK、新基础设施服务、数据库迁移或公开工作流路由，必须停止实施并请求审批。

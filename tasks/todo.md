@@ -7,7 +7,7 @@ Source of truth: `docs/spec.md` at `92e50a6`. Detailed rationale, file scope, an
 - Work in task-number order unless `tasks/plan.md` explicitly marks work as parallel-safe.
 - Mark a task complete only when its acceptance and verification sub-items pass.
 - Stop at every checkpoint for a green repository-wide check and review.
-- Keep raw imagery, `.env`, credentials, generated rasters/reports, logs, and test artifacts out of Git.
+- Keep raw imagery, `.env*`, credentials, generated rasters/reports, logs, and test artifacts out of Git.
 - Use small atomic commits; do not combine an unrelated refactor with an implementation task.
 
 ## 审批门禁
@@ -20,6 +20,8 @@ Source of truth: `docs/spec.md` at `92e50a6`. Detailed rationale, file scope, an
     质量阈值不变。
 - [x] G3：已提供不提交到 Git 的大模型运行配置，并完成脱敏真实冒烟。
 - [x] G4：在容器验证前启动 OrbStack/Docker。
+- [ ] G5：批准后端专用、可降级的高德研究区校验边界；详见
+  `tasks/approvals/G5-amap-web-service-integration.md`。
 
 ## Day 1 — Contract and runnable foundation
 
@@ -185,37 +187,46 @@ Source of truth: `docs/spec.md` at `92e50a6`. Detailed rationale, file scope, an
 - [x] T21-T22 的测试、Lint、类型、构建和契约检查通过，浏览器控制台与必需网络请求干净。
 - [x] 答辩教师无需阅读代码即可理解任务、Agent 链、地图、质量、失败、重试和报告。
 
-## Day 9 — End-to-end proof and hardening
+## 第 9 天——高德位置校验与确定性全链证明
 
-- [ ] **T23 Prove contracts/full deterministic chain** (depends: T08, T10-T18)
-  - [ ] Validate every public/internal payload against the single shared contract.
-  - [ ] Assert expected raster/statistical/quality/report results under one traceable task ID.
-  - [ ] Pass illegal-plan, corrupt-data, unavailable-Agent, and partial-artifact failure cases.
-- [ ] **T24 Automate Compose browser journey** (depends: T04-T05, T19-T23; gate: G4)
-  - [ ] One command verifies readiness through completion/map/metrics/report/refresh/failure/retry.
-  - [ ] Pass both fresh-volume and warm-cache runs on Apple Silicon.
-  - [ ] Retain diagnostic failures but keep all generated/raw artifacts out of Git.
-- [ ] **T25 Harden security/observability/operations** (depends: T24)
-  - [ ] Cover input, model, path, cross-task, timeout, resource, and secret-redaction threats.
-  - [ ] Trace one attempt across all containers and distinguish actionable health/error states.
-  - [ ] Pass full regression suite plus manual secret/path/cross-task review.
+- [ ] **T23 建立安全、可降级的高德 Web 服务适配器**（依赖：T01、T03、T14；门禁：G5）
+  - [ ] Key 仅注入 Master；固定 HTTPS 域名、严格超时/响应上限/JSON 校验且不记录原始响应。
+  - [ ] 假服务覆盖成功、零/多结果、认证、限流、超时、重定向、超大响应和密钥脱敏。
+  - [ ] 显式真实冒烟只输出脱敏状态并返回 `infocode=10000`。
+- [ ] **T24 把研究区地名校验接入 Master 规划流程**（依赖：T05、T15-T18、T23）
+  - [ ] 神农溪/巴东县查询产生验证通过证据，但仍只使用 G2 流域、影像与计算参数。
+  - [ ] 明确指向其他地区的请求不再静默绑定神农溪；模糊结果不伪装成已验证。
+  - [ ] 高德未配置、超时或限流时，规范内任务可观测降级并继续离线主链。
 
-### Checkpoint H
+### 检查点 H1（高德接入边界）
 
-- [ ] T23-T25 pass from repository-root commands.
-- [ ] All 12 specification success criteria have automated or named rehearsal evidence.
-- [ ] Git contains no credential, raw imagery, generated result, report, log, or test artifact.
+- [ ] T23-T24 的单元、契约、类型和 Compose 定向验证通过。
+- [ ] 浏览器、日志、PostGIS、Redis、报告与 Git 不含高德 Key 或原始响应。
+- [ ] 高德可用/降级两次运行的 G2 分析与质量成果一致，仅校验证据不同。
 
-## Day 10 — Real rehearsal and handoff
+- [ ] **T25 证明契约和确定性完整 Agent 链**（依赖：T08、T10-T18、T24）
+  - [ ] 全部公开/内部载荷通过同一共享契约与 OpenAPI。
+  - [ ] 假 LLM/高德服务下的验证与降级链产生数学可复现的栅格、统计、质量和报告。
+  - [ ] 非目标地区、非法计划、损坏数据、不可达 Agent 和部分成果均不产生虚假成功。
 
-- [ ] **T26 Rehearse and document delivery** (depends: T05, T14, T25; gates: G2-G4)
-  - [ ] Record one real-LLM/real-raster run satisfying all success criteria with IDs/timings/checksums/evidence.
-  - [ ] Prove refresh, forced failure/retry, warm cached/offline-data operation, and non-destructive stop.
-  - [ ] Validate setup, preflight, demo, verification, troubleshooting, and teardown docs on target machine.
+## 第 10 天——浏览器验收、加固与交付
 
-### Final checkpoint
+- [ ] **T26 自动化关键 Compose 浏览器旅程**（依赖：T04-T05、T19-T22、T25；门禁：G4）
+  - [ ] 一键验证就绪、位置证据、完成、地图、指标、报告、刷新、失败与重试。
+  - [ ] Apple Silicon 上全新 volume 和温缓存复跑均通过，E2E 不调用真实高德。
+  - [ ] 保留失败诊断，但密钥、原始数据、高德响应与生成成果不进入 Git。
+- [ ] **T27 执行安全、可观测性和运行加固**（依赖：T26）
+  - [ ] 覆盖输入、模型/高德响应、SSRF、路径、跨任务、超时、资源和密钥脱敏威胁。
+  - [ ] 跨容器追踪同一尝试，并区分必需依赖故障与高德可选增强降级。
+  - [ ] 全量回归及人工密钥、路径、跨任务和高德数据留存检查通过。
+- [ ] **T28 演练真实答辩并完成交付文档**（依赖：T05、T14、T27；门禁：G2-G5）
+  - [ ] 记录真实 LLM/栅格/高德冒烟运行的 ID、耗时、校验和与证据。
+  - [ ] 证明刷新、强制失败/重试、温缓存及关闭高德网络后的离线主链。
+  - [ ] 在目标机器验证配置、预检、演示、状态码/额度、Key 轮换、排障与非破坏性停止文档。
 
-- [ ] All task acceptance criteria and project Definition of Done are satisfied.
-- [ ] `docker compose up --build` and all documented one-command checks pass on the target machine.
-- [ ] Real rehearsal evidence is reviewed and no presentation-time imagery download is required.
-- [ ] `git status --short` shows only intentional source/documentation changes.
+### 检查点 H2 与最终检查点
+
+- [ ] T25-T28 可从仓库根目录通过文档化命令执行。
+- [ ] 规格 12 项成功标准均有自动化或具名演练证据，Definition of Done 全部满足。
+- [ ] `docker compose up --build` 与所有一键检查在目标机器通过。
+- [ ] 演示不依赖下载影像或高德在线可用；`git status --short` 只含预期源码/文档。
