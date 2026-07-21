@@ -132,26 +132,26 @@ Source of truth: `docs/spec.md` at `92e50a6`. Detailed rationale, file scope, an
 - [x] 任务创建不阻塞且可查询，就绪状态如实呈现。
 - [x] 中文报告可读，并与所属任务严格绑定。
 
-## Day 6 — Orchestration, SSE, and retry
+## 第 6 天——编排、SSE 与重试
 
-- [ ] **T16 Orchestrate complete network Agent chain** (depends: T08, T10-T15)
-  - [ ] Propagate one task/attempt/correlation identity through all requests/logs/records/artifacts.
-  - [ ] Persist legal monotonic states; complete only with all required outputs and acceptable quality.
-  - [ ] Pass full-chain and forced Agent timeout/invalid/unreachable failure tests.
-- [ ] **T17 Stream durable SSE progress** (depends: T07, T15-T16)
-  - [ ] Implement ordered replay, heartbeat, cleanup, `Last-Event-ID`, and durable fallback.
-  - [ ] Ensure slow/disconnected clients do not block work and query supports equivalent polling.
-  - [ ] Pass reconnect, duplicate/gap, Redis-loss, slow-client, and terminal-stream tests.
-- [ ] **T18 Implement retry/startup recovery** (depends: T16-T17)
-  - [ ] Preserve immutable attempt history and resume only from a checksum-valid safe checkpoint.
-  - [ ] Make duplicate/concurrent retry idempotent and restart recovery non-duplicating.
-  - [ ] Pass forced failure/retry at every Agent and Master-restart tests.
+- [x] **T16 通过网络编排完整 Agent 链**（依赖：T08、T10-T15）
+  - [x] 所有请求、日志、记录和成果使用同一个任务、尝试次数与关联标识。
+  - [x] 持久化合法且单调的状态；只有质量通过并具备全部必需成果时才完成。
+  - [x] 完整链及 Agent 超时、非法响应、服务不可达的强制失败测试均通过。
+- [ ] **T17 通过 SSE 推送持久化进度**（依赖：T07、T15-T16）
+  - [ ] 实现有序重放、心跳、清理、`Last-Event-ID` 和持久化降级。
+  - [ ] 确保慢速或断开的客户端不阻塞任务，查询端点支持等价轮询。
+  - [ ] 通过重连、重复或缺口、Redis 丢失、慢客户端和终态事件流测试。
+- [ ] **T18 实现安全重试与启动恢复**（依赖：T16-T17）
+  - [ ] 保留不可变的尝试历史，只从校验和有效的安全检查点恢复。
+  - [ ] 使重复或并发重试具备幂等性，且重启恢复不会重复执行已完成步骤。
+  - [ ] 通过每个 Agent 的强制失败/重试以及 Master 重启测试。
 
-### Checkpoint F
+### 检查点 F
 
-- [ ] T16-T18 pass for completion, failure, retry, refresh, and Master restart.
-- [ ] No failure is shown as success; previous attempts remain queryable.
-- [ ] One correlation query reconstructs the entire cross-container workflow.
+- [ ] T16-T18 的完成、失败、重试、刷新和 Master 重启验证通过。
+- [ ] 不把失败显示为成功，且此前尝试始终可查询。
+- [ ] 使用一个关联标识即可重建完整的跨容器工作流。
 
 ## Day 7 — Task and timeline Web UI
 

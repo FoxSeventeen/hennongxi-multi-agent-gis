@@ -507,76 +507,77 @@ The critical path is contracts → persistence/events → raster chain → orche
 - [x] 任务在处理开始前即可创建和查询，LLM/数据就绪阻塞项如实呈现。
 - [x] 固定样例报告可读中文，并且只能通过经过校验的任务归属关系下载。
 
-### Phase 6: Orchestration, streaming, and recovery
+### 阶段 6：编排、事件流与恢复
 
-#### Task 16: Orchestrate the complete Agent chain over the network
+#### 任务 16：通过网络编排完整 Agent 链
 
-**Description:** Run the approved plan outside the creation request lifecycle, invoke Data → Analysis → Quality → Publisher through HTTP, commit each legal state/step/event transition, aggregate artifacts, and complete only after all required outputs exist.
+**说明：**在任务创建请求生命周期之外执行已批准计划，通过 HTTP 依次调用 Data → Analysis → Quality → Publisher，持久化每个合法的任务状态、步骤和事件转换，汇总成果，并且只在全部必需成果存在后完成任务。
 
-**Acceptance criteria:**
+**验收标准：**
 
-- [ ] One `task_id`/attempt/correlation chain is visible in all Agent requests, logs, durable steps, events, and artifacts.
-- [ ] The exact legal state order is persisted, progress is monotonic, and `COMPLETED` requires all required artifacts plus a non-failing quality result.
-- [ ] Timeouts, invalid Agent responses, and unreachable services transition honestly to `FAILED` with a structured error at the correct step.
+- [x] 所有 Agent 请求、日志、持久化步骤、事件和成果均可追踪到同一个 `task_id`、尝试次数和关联标识。
+- [x] 精确持久化合法状态顺序且进度单调递增；只有质量结论通过并存在全部 7 类必需成果时才可进入 `COMPLETED`。
+- [x] 超时、非法 Agent 响应和服务不可达均会在正确步骤如实进入 `FAILED`，并保存结构化错误。
 
-**Verification:**
+**验证：**
 
-- [ ] `docker compose run --rm master pytest tests/integration/test_orchestration.py -q`
-- [ ] A service-boundary spy proves every Agent step used HTTP rather than an in-process import/call.
+- [x] `docker compose run --rm master-agent pytest services/master/tests/integration/test_orchestration.py -q`
+- [x] HTTP 服务边界观察器记录到四个固定私网端点，证明各 Agent 步骤没有使用进程内导入或调用。
+- [x] Compose 生命周期冒烟任务 `ab5bc482-3ba8-4e03-89b9-f395d4e5bc9c` 使用真实 LLM 计划完成，进度为 100%，并生成全部 7 类成果。
 
-**Dependencies:** T08, T10-T15.
+**依赖：**T08、T10-T15。
 
-**Files likely touched:** `services/master/app/orchestrator.py`, HTTP client module, orchestration integration tests.
+**涉及文件：**`services/master/src/hennongxi_master/orchestrator.py`、`agent_client.py`、`worker.py`、`runtime.py`、Master 集成测试和 Compose 配置。
 
-**Estimated scope:** M.
+**工作量：**中等。
 
-#### Task 17: Stream durable progress through SSE with polling fallback semantics
+#### 任务 17：通过 SSE 推送持久化进度并提供轮询降级语义
 
-**Description:** Implement the task event endpoint with replay, heartbeat, disconnect cleanup, `Last-Event-ID`, and documented polling behavior. Ensure slow/disconnected clients cannot block task execution.
+**说明：**实现支持重放、心跳、断开清理、`Last-Event-ID` 和已记录轮询行为的任务事件端点，确保慢速或断开的客户端不会阻塞任务执行。
 
-**Acceptance criteria:**
+**验收标准：**
 
-- [ ] A subscriber receives ordered state/progress/error/artifact events and can reconnect without duplicates or gaps using the last event ID.
-- [ ] Redis loss triggers durable replay/fallback behavior; disconnected clients release resources promptly.
-- [ ] The query endpoint contains enough current state for the Web to poll to the same terminal result.
+- [ ] 订阅方按顺序收到状态、进度、错误和成果事件，并可使用最后事件编号无重复、无缺口地重连。
+- [ ] Redis 丢失时触发持久化重放或降级；断开的客户端及时释放资源。
+- [ ] 查询端点包含足够的当前状态，使 Web 轮询可得到相同的终态结果。
 
-**Verification:**
+**验证：**
 
-- [ ] `docker compose run --rm master pytest services/master/tests/integration/test_sse.py -q`
-- [ ] Concurrent slow-client, reconnect, Redis-restart, and terminal-stream tests pass.
+- [ ] `docker compose run --rm master-agent pytest services/master/tests/integration/test_sse.py -q`
+- [ ] 慢客户端、重连、Redis 重启和终态事件流的并发测试通过。
 
-**Dependencies:** T07, T15, T16.
+**依赖：**T07、T15、T16。
 
-**Files likely touched:** `services/master/app/api/events.py`, SSE adapter, SSE integration tests.
+**涉及文件：**Master 事件 API、SSE 适配器和 SSE 集成测试。
 
-**Estimated scope:** M.
+**工作量：**中等。
 
-#### Task 18: Implement safe retry and startup recovery
+#### 任务 18：实现安全重试与启动恢复
 
-**Description:** Add failed-task retry, attempt history, upstream checksum validation, downstream reset, idempotency, and startup recovery for interrupted nonterminal tasks. Preserve prior failures visibly.
+**说明：**增加失败任务重试、尝试历史、上游校验和验证、下游重置、幂等控制，以及中断的非终态任务在启动时的恢复；此前失败必须保持可见。
 
-**Acceptance criteria:**
+**验收标准：**
 
-- [ ] Only `FAILED` tasks can retry; one new attempt resumes from the failed safe checkpoint and preserves all prior events/artifacts as history.
-- [ ] Concurrent/duplicate retry requests are idempotent, and invalid upstream artifacts force recomputation rather than unsafe reuse.
-- [ ] Restarting Master during analysis produces a recoverable/failed state and can reach the correct terminal state without duplicate completed steps.
+- [ ] 只有 `FAILED` 任务可重试；新尝试从失败后的安全检查点恢复，并保留此前所有事件和成果历史。
+- [ ] 并发或重复重试请求具备幂等性；上游成果无效时必须重新计算，不能不安全复用。
+- [ ] 分析期间重启 Master 会产生可恢复或明确失败状态，随后可到达正确终态且不会重复完成步骤。
 
-**Verification:**
+**验证：**
 
-- [ ] `docker compose run --rm master pytest tests/integration/test_retry_recovery.py -q`
-- [ ] Forced Data/Analysis/Quality/Publisher failure cases each recover from the expected checkpoint.
+- [ ] `docker compose run --rm master-agent pytest services/master/tests/integration/test_retry_recovery.py -q`
+- [ ] Data、Analysis、Quality、Publisher 的强制失败均从预期检查点恢复。
 
-**Dependencies:** T16, T17.
+**依赖：**T16、T17。
 
-**Files likely touched:** `services/master/app/recovery.py`, retry API/orchestrator changes, retry integration tests.
+**涉及文件：**Master 恢复模块、重试 API、编排器改动和重试集成测试。
 
-**Estimated scope:** M.
+**工作量：**中等。
 
-#### Checkpoint F: Resilient backend journey
+#### 检查点 F：具备恢复能力的后端流程
 
-- [ ] T16-T18 verification passes with a complete run, forced failure, retry, refresh, and Master restart.
-- [ ] No failure path is presented as success; attempt history remains queryable.
-- [ ] One correlation query reconstructs the complete cross-container workflow.
+- [ ] T16-T18 的完整运行、强制失败、重试、刷新和 Master 重启验证通过。
+- [ ] 不把任何失败路径显示为成功，且尝试历史始终可查询。
+- [ ] 使用一个关联标识即可重建完整的跨容器工作流。
 
 ### Phase 7: Chinese operational Web experience
 
