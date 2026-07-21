@@ -153,21 +153,21 @@ Source of truth: `docs/spec.md` at `92e50a6`. Detailed rationale, file scope, an
 - [x] 不把失败显示为成功，且此前尝试始终可查询。
 - [x] 使用一个关联标识即可重建完整的跨容器工作流。
 
-## Day 7 — Task and timeline Web UI
+## 第 7 天——任务与时间线 Web 界面
 
-- [ ] **T19 Build map-first shell/task/readiness UI** (depends: T01-T02, T15)
-  - [ ] Provide accessible responsive Chinese readiness, task input, loading, and error states.
-  - [ ] Use contract-checked API types and prevent duplicate submission.
-  - [ ] Pass component tests, lint, type check, keyboard/focus/contrast checks.
-- [ ] **T20 Render live Agent timeline** (depends: T17, T19)
-  - [ ] Show task ID, ordered Agents/steps/status/progress/time/error in Chinese.
-  - [ ] Recover SSE with polling/backoff and rebuild the task after page refresh.
-  - [ ] Pass timeline/SSE/polling/refresh tests and clean-browser runtime check.
+- [x] **T19 构建地图优先的外壳、任务与就绪界面**（依赖：T01-T02、T15）
+  - [x] 提供可访问、响应式的中文就绪状态、任务输入、加载和错误界面。
+  - [x] 使用经契约校验的 API 类型并阻止重复提交。
+  - [x] 通过组件测试、lint、类型检查以及键盘、焦点和对比度检查。
+- [ ] **T20 渲染实时 Agent 时间线**（依赖：T17、T19）
+  - [ ] 以中文显示任务编号、有序 Agent、步骤、状态、进度、耗时和错误。
+  - [ ] SSE 断开后通过轮询与退避策略恢复，并在页面刷新后重建任务。
+  - [ ] 通过时间线、SSE、轮询、刷新测试及干净浏览器运行检查。
 
-### Checkpoint G1
+### 检查点 G1
 
-- [ ] T19-T20 pass at laptop and narrow viewport sizes.
-- [ ] Task creation through live progress survives disconnect and refresh.
+- [ ] T19-T20 在笔记本与窄视口尺寸下通过验证。
+- [ ] 从任务创建到实时进度的流程可以承受断线和刷新。
 
 ## Day 8 — Map and result UI
 

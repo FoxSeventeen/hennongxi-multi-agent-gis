@@ -582,49 +582,52 @@ The critical path is contracts → persistence/events → raster chain → orche
 - [x] 不把任何失败路径显示为成功，且尝试历史始终可查询。
 - [x] 使用一个关联标识即可重建完整的跨容器工作流。
 
-### Phase 7: Chinese operational Web experience
+### 阶段 7：中文可观测 Web 体验
 
-#### Task 19: Build the accessible map-first shell, task input, and readiness panel
+#### 任务 19：构建可访问的地图优先外壳、任务输入和就绪面板
 
-**Description:** Replace the placeholder Web with a strict TypeScript React/Vite application: prominent map canvas, Chinese task composer, readiness/Agent status, responsive layout, accessible controls, and typed Master client.
+**说明：**使用严格 TypeScript 的 React/Vite 应用替换 Web 占位页，提供醒目的地图画布、中文任务输入、就绪与 Agent 状态、响应式布局、无障碍控件以及带类型的 Master 客户端。
 
-**Acceptance criteria:**
+**验收标准：**
 
-- [ ] Users can see configuration/Agent readiness and submit a valid Chinese request once, with loading and structured error states.
-- [ ] Layout is usable at target laptop and narrow viewport sizes, with keyboard focus, labels, contrast, and reduced-motion behavior.
-- [ ] API types derive from or are checked against the approved schema; snake_case transport does not leak ad hoc field names into components.
+- [x] 用户可以查看配置与 Agent 就绪状态，并且只提交一次有效中文请求；界面具备加载和结构化错误状态。
+- [x] 布局可在目标笔记本和窄视口使用，具备键盘焦点、可访问标签、合格对比度和减少动态效果的适配。
+- [x] API 类型由已批准的模式生成或校验；传输层的 `snake_case` 不会以临时字段名泄漏到组件中。
 
-**Verification:**
+**验证：**
 
-- [ ] `docker compose run --rm web npm test -- --run -t 'task submission|readiness'`
-- [ ] `docker compose run --rm web npm run lint && docker compose run --rm web npm run typecheck`
+- [x] `docker compose run --rm web npm test -- --run -t 'task submission|readiness'`
+- [x] `docker compose run --rm web npm run lint && docker compose run --rm web npm run typecheck`
+- [x] Web 共 14 项测试通过；lint、类型检查、构建和 OpenAPI 生成类型一致性检查均通过。
+- [x] 在 1280×720 与 390×844 的真实浏览器中完成运行检查，无横向溢出、控制台错误或警告；键盘焦点、文本对比度和减少动态效果适配符合要求。
+- [x] 通过真实 Compose 环境确认 Master、4 个 Agent、PostGIS 和 Redis 共 7 项服务正常，任务按钮仅在系统就绪时启用。
 
-**Dependencies:** T01, T02, T15.
+**依赖：**T01、T02、T15。
 
-**Files likely touched:** `apps/web/src/app/`, `apps/web/src/api/`, `apps/web/src/components/TaskPanel*`, Web tests/styles.
+**实际修改文件：**`apps/web/src/app/`、`apps/web/src/api/`、`apps/web/src/components/`、Web 测试与样式、严格 TypeScript/Vite/Vitest/ESLint 配置及生成的 OpenAPI 类型。
 
-**Estimated scope:** M.
+**工作量：**中等。
 
-#### Task 20: Render the live Agent timeline with SSE/polling recovery
+#### 任务 20：使用 SSE 与轮询恢复渲染实时 Agent 时间线
 
-**Description:** Add a task-scoped timeline that opens SSE, renders each Agent/step/state/progress/time/error in Chinese, falls back to bounded polling, and reconstructs state after page refresh.
+**说明：**增加任务级时间线：建立 SSE 连接，以中文呈现每个 Agent、步骤、状态、进度、时间和错误；断线后回退到有界轮询，并在页面刷新后重建状态。
 
-**Acceptance criteria:**
+**验收标准：**
 
-- [ ] The same visible `task_id` anchors ordered Agent steps, progress, elapsed time, current status, and honest failure details.
-- [ ] SSE disconnect switches to polling with backoff and can resume streaming without duplicated timeline events.
-- [ ] Loading an existing task URL after refresh reconstructs the plan/timeline and continues to the correct terminal state.
+- [ ] 使用同一个可见的 `task_id` 关联有序 Agent 步骤、进度、耗时、当前状态和真实失败详情。
+- [ ] SSE 断开后使用退避策略切换到轮询，并能恢复流式连接且不产生重复时间线事件。
+- [ ] 刷新后打开现有任务地址，可以重建计划与时间线并继续到正确的终态。
 
-**Verification:**
+**验证：**
 
 - [ ] `docker compose run --rm web npm test -- --run -t 'timeline|SSE|polling|refresh'`
-- [ ] Browser runtime check confirms no duplicate events, leaked connections, or console errors.
+- [ ] 真实浏览器运行检查确认不存在重复事件、连接泄漏或控制台错误。
 
-**Dependencies:** T17, T19.
+**依赖：**T17、T19。
 
-**Files likely touched:** `apps/web/src/features/timeline/`, streaming hook/API client, timeline tests.
+**预计修改文件：**`apps/web/src/features/timeline/`、流式连接 Hook/API 客户端及时间线测试。
 
-**Estimated scope:** M.
+**工作量：**中等。
 
 #### Task 21: Display watershed and computed raster layers in MapLibre
 
