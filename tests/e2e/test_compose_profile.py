@@ -30,6 +30,7 @@ def test_e2e_profile_uses_only_private_deterministic_upstreams() -> None:
     master_environment = services["master-agent"]["environment"]
 
     assert master_environment["LLM_BASE_URL"] == "http://e2e-support:8999/v1"
+    assert master_environment["PUBLISHER_AGENT_BASE_URL"] == "http://e2e-support:8999"
     assert master_environment["AMAP_WEB_SERVICE_KEY"] == ""
     assert master_environment["DATA_MANIFEST_PATH"] == "/e2e/data/manifest.json"
     assert services["master-agent"]["command"][1] == "tests.e2e.master:app"
@@ -37,6 +38,10 @@ def test_e2e_profile_uses_only_private_deterministic_upstreams() -> None:
     assert services["master-agent"]["ports"] == []
     assert services["publisher-agent"]["ports"] == []
     assert services["e2e-support"]["networks"] == ["private"]
+    assert services["e2e-support"]["depends_on"]["publisher-agent"] == {
+        "condition": "service_healthy"
+    }
+    assert services["e2e"]["networks"] == ["private"]
     assert "ports" not in services["e2e-support"]
     assert services["e2e-seed"]["volumes"] == [
         {"type": "volume", "source": "e2e-data", "target": "/e2e"}
