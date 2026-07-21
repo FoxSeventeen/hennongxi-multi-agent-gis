@@ -35,6 +35,8 @@ function createClient(getReadiness = vi.fn().mockResolvedValue(readySnapshot)): 
   return {
     getReadiness,
     createTask: vi.fn(),
+    getTask: vi.fn(),
+    streamTaskEvents: vi.fn(),
   };
 }
 

@@ -1,4 +1,12 @@
 import type { components } from "./schema.generated";
+import { consumeEventStream } from "./sse";
+import {
+  isTaskId,
+  parseTaskEvent,
+  parseTaskSnapshot,
+  type TaskEvent,
+  type TaskSnapshot,
+} from "./task-contract";
 
 type ErrorCode = components["schemas"]["ErrorCode"];
 type HealthState = components["schemas"]["HealthState"];
@@ -67,6 +75,14 @@ export class MasterApiError extends Error {
 export interface MasterClient {
   getReadiness(): Promise<ReadinessSnapshot>;
   createTask(query: string): Promise<AcceptedTask>;
+  getTask(taskId: string): Promise<TaskSnapshot>;
+  streamTaskEvents(taskId: string, options: StreamTaskEventsOptions): Promise<void>;
+}
+
+export interface StreamTaskEventsOptions {
+  readonly afterSequence: number;
+  readonly signal: AbortSignal;
+  readonly onEvent: (event: TaskEvent) => void;
 }
 
 interface MasterClientOptions {
@@ -184,6 +200,61 @@ export function createMasterClient(options: MasterClientOptions): MasterClient {
         createdAt: payload.created_at,
       };
     },
+
+    async getTask(taskId: string): Promise<TaskSnapshot> {
+      requireTaskId(taskId);
+      const payload = await requestJson(fetcher, `${baseUrl}/api/v1/tasks/${taskId}`, {
+        headers: { accept: "application/json" },
+      });
+      const snapshot = parseTaskSnapshot(payload, taskId);
+      if (snapshot === null) {
+        throw invalidResponseError();
+      }
+      return snapshot;
+    },
+
+    async streamTaskEvents(taskId: string, streamOptions: StreamTaskEventsOptions): Promise<void> {
+      requireTaskId(taskId);
+      if (!Number.isSafeInteger(streamOptions.afterSequence) || streamOptions.afterSequence < 0) {
+        throw new MasterApiError({
+          code: "VALIDATION_ERROR",
+          message: "任务事件游标无效。",
+          retryable: false,
+        });
+      }
+
+      const headers: Record<string, string> = { accept: "text/event-stream" };
+      if (streamOptions.afterSequence > 0) {
+        headers["Last-Event-ID"] = String(streamOptions.afterSequence);
+      }
+      const response = await requestResponse(fetcher, `${baseUrl}/api/v1/tasks/${taskId}/events`, {
+        method: "GET",
+        headers,
+        signal: streamOptions.signal,
+      });
+      if (!response.ok) {
+        const payload = await readJson(response);
+        throw responseError(response, payload);
+      }
+      if (!response.headers.get("content-type")?.toLowerCase().startsWith("text/event-stream")) {
+        throw invalidResponseError();
+      }
+
+      try {
+        await consumeEventStream(response, (sequence, payload) => {
+          const event = parseTaskEvent(payload, taskId);
+          if (event?.sequence !== sequence) {
+            throw invalidResponseError();
+          }
+          streamOptions.onEvent(event);
+        });
+      } catch (reason: unknown) {
+        if (reason instanceof MasterApiError || streamOptions.signal.aborted) {
+          throw reason;
+        }
+        throw invalidResponseError();
+      }
+    },
   };
 }
 
@@ -192,37 +263,60 @@ async function requestJson(
   url: string,
   init: RequestInit,
 ): Promise<unknown> {
-  let response: Response;
+  const response = await requestResponse(fetcher, url, init);
+  const payload = await readJson(response);
+  if (!response.ok) {
+    throw responseError(response, payload);
+  }
+  return payload;
+}
+
+async function requestResponse(
+  fetcher: typeof fetch,
+  url: string,
+  init: RequestInit,
+): Promise<Response> {
   try {
-    response = await fetcher(url, init);
-  } catch {
+    return await fetcher(url, init);
+  } catch (reason: unknown) {
+    if (init.signal?.aborted) {
+      throw reason;
+    }
     throw new MasterApiError({
       code: "DEPENDENCY_UNAVAILABLE",
       message: "无法连接 Master 服务，请稍后重试。",
       retryable: true,
     });
   }
+}
 
-  const payload = await readJson(response);
-  if (!response.ok) {
-    if (isErrorResponse(payload)) {
-      throw new MasterApiError({
-        code: payload.error.code,
-        message: payload.error.message,
-        retryable: payload.error.retryable,
-        details: payload.error.details.map((detail) => ({
-          field: detail.field ?? null,
-          reason: detail.reason,
-        })),
-      });
-    }
-    throw new MasterApiError({
-      code: response.status >= 500 ? "DEPENDENCY_UNAVAILABLE" : "INTERNAL_ERROR",
-      message: `Master 服务返回异常（HTTP ${String(response.status)}）。`,
-      retryable: response.status >= 500,
+function responseError(response: Response, payload: unknown): MasterApiError {
+  if (isErrorResponse(payload)) {
+    return new MasterApiError({
+      code: payload.error.code,
+      message: payload.error.message,
+      retryable: payload.error.retryable,
+      details: payload.error.details.map((detail) => ({
+        field: detail.field ?? null,
+        reason: detail.reason,
+      })),
     });
   }
-  return payload;
+  return new MasterApiError({
+    code: response.status >= 500 ? "DEPENDENCY_UNAVAILABLE" : "INTERNAL_ERROR",
+    message: `Master 服务返回异常（HTTP ${String(response.status)}）。`,
+    retryable: response.status >= 500,
+  });
+}
+
+function requireTaskId(taskId: string): void {
+  if (!isTaskId(taskId)) {
+    throw new MasterApiError({
+      code: "VALIDATION_ERROR",
+      message: "任务编号格式无效。",
+      retryable: false,
+    });
+  }
 }
 
 async function readJson(response: Response): Promise<unknown> {
