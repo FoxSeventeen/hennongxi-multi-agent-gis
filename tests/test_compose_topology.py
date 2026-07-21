@@ -7,6 +7,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 COMPOSE_PATH = ROOT / "docker-compose.yml"
+ENV_EXAMPLE_PATH = ROOT / ".env.example"
 
 AGENT_SERVICES = {
     "master-agent",
@@ -107,6 +108,24 @@ def test_publisher_uses_the_same_approved_data_manifest_as_upstream_agents() -> 
 
     for service_name in ("data-agent", "analysis-agent", "quality-agent", "publisher-agent"):
         assert services[service_name]["environment"]["DATA_MANIFEST_PATH"] == expected
+
+
+def test_amap_credential_is_blank_by_default_and_injected_only_into_master() -> None:
+    services = load_compose()["services"]
+    master_environment = services["master-agent"]["environment"]
+
+    assert master_environment["AMAP_WEB_SERVICE_KEY"] == "${AMAP_WEB_SERVICE_KEY:-}"
+    assert master_environment["AMAP_TIMEOUT_SECONDS"] == "${AMAP_TIMEOUT_SECONDS:-3}"
+    assert "AMAP_BASE_URL" not in master_environment
+
+    for service_name, service in services.items():
+        if service_name != "master-agent":
+            assert not any(key.startswith("AMAP_") for key in service.get("environment", {}))
+
+    example = ENV_EXAMPLE_PATH.read_text(encoding="utf-8")
+    assert "AMAP_WEB_SERVICE_KEY=\n" in example
+    assert "AMAP_TIMEOUT_SECONDS=3\n" in example
+    assert "AMAP_BASE_URL" not in example
 
 
 def test_dependencies_wait_for_healthy_services_without_cycles() -> None:

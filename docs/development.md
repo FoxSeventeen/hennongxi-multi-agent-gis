@@ -70,6 +70,38 @@ docker compose run --rm --build --no-deps master-agent \
 供应商请求 ID、原始响应或模型生成的步骤标题。退出码 `0` 表示真实计划通过白名单校验，
 `1` 表示已脱敏的供应商/计划错误，`2` 表示配置缺失，`3` 表示未分类的内部错误。
 
+## 真实高德研究区校验冒烟
+
+高德调用只在操作员显式执行冒烟命令时发生，默认单元测试全部使用本地假响应。创建已被
+`.gitignore` 覆盖的 `.env.amap.local`，只在其中配置 Web 服务 Key：
+
+```dotenv
+AMAP_WEB_SERVICE_KEY=请替换为本机高德Web服务Key
+AMAP_TIMEOUT_SECONDS=3
+```
+
+不要配置自定义域名；适配器固定访问 `https://restapi.amap.com/v3/place/text`，只发送允许表中的
+规范名称、巴东县 `adcode` 和风景名胜类别，不发送用户提示词、任务标识、影像或成果信息。
+显式冒烟命令为：
+
+```bash
+docker compose --env-file .env --env-file .env.amap.local \
+  run --rm --build --no-deps master-agent \
+  python -m hennongxi_master.amap_smoke
+```
+
+退出码 `0` 表示唯一规范结果通过，`1` 表示零/多结果或已脱敏的高德错误，`2` 表示本地配置
+缺失，`3` 表示未分类内部错误。输出只含固定提供商源指纹、脱敏状态、检查时间、耗时、是否
+可重试、匹配数量；高德成功响应还显示 `infocode=10000`。输出不含 Key、完整 URL、POI、
+坐标、地址、原始响应或高德错误正文，代码也不缓存或持久化这些数据。
+
+Key 必须在高德控制台创建为“Web 服务”类型并具有 POI 搜索权限；`10001`、`10002`、
+`10009` 分别通常表示 Key 无效、服务无权限和平台类型不匹配。查询参数、`citylimit` 与
+`adcode` 规则见[高德 POI 搜索文档](https://lbs.amap.com/api/webservice/guide/api/search/)，错误
+分类见[高德 Web 服务错误码](https://lbs.amap.com/api/webservice/guide/tools/info/)。高德返回的
+GCJ-02 坐标不得与本项目 G2 的 WGS84/Web Mercator 边界和遥感成果直接叠加；本适配器不会
+返回或使用坐标。
+
 ## Compose 运行时
 
 先复制本地配置并启动 OrbStack/Docker 后端；不要把真实密钥提交到 Git：
