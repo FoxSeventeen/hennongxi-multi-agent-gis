@@ -614,18 +614,24 @@ The critical path is contracts → persistence/events → raster chain → orche
 
 **验收标准：**
 
-- [ ] 使用同一个可见的 `task_id` 关联有序 Agent 步骤、进度、耗时、当前状态和真实失败详情。
-- [ ] SSE 断开后使用退避策略切换到轮询，并能恢复流式连接且不产生重复时间线事件。
-- [ ] 刷新后打开现有任务地址，可以重建计划与时间线并继续到正确的终态。
+- [x] 使用同一个可见的 `task_id` 关联有序 Agent 步骤、进度、耗时、当前状态和真实失败详情。
+- [x] SSE 断开后使用退避策略切换到轮询，并能恢复流式连接且不产生重复时间线事件。
+- [x] 刷新后打开现有任务地址，可以重建计划与时间线并继续到正确的终态。
 
 **验证：**
 
-- [ ] `docker compose run --rm web npm test -- --run -t 'timeline|SSE|polling|refresh'`
-- [ ] 真实浏览器运行检查确认不存在重复事件、连接泄漏或控制台错误。
+- [x] `docker compose run --rm --no-deps web npm test -- --run -t 'timeline|SSE|polling|refresh'`
+- [x] 精确测试覆盖分块 SSE、`Last-Event-ID`、事件去重、1/2/4/8 秒有界退避、轮询降级、流式恢复、卸载清理、URL 刷新和非法任务地址；最终 Web 共 30 项测试通过。
+- [x] 真实 Compose 任务 `2b7d6183-d273-4b1f-9d0b-9ab0fa6c74b5` 使用真实大模型计划并完成四个私有 Agent 步骤；刷新相同任务地址后重建 5 个唯一阶段和 100% 终态。
+- [x] 在 1280×720 与 390×844 的真实浏览器中确认任务编号完整显示、无横向溢出、无重复阶段、无控制台错误或警告。
+- [x] 短暂停止 Master 时页面进入“轮询恢复”，服务恢复后自动回到 5 个阶段的完成态；终态 SSE 正常关闭且没有遗留连接。
+- [x] 最终五轴审查修复了完整超大 SSE 帧绕过 262,144 字符缓冲限制的问题，并加入回归测试。
 
 **依赖：**T17、T19。
 
-**预计修改文件：**`apps/web/src/features/timeline/`、流式连接 Hook/API 客户端及时间线测试。
+**实际修改文件：**`apps/web/src/features/timeline/`、`apps/web/src/api/client.ts`、`apps/web/src/api/sse.ts`、`apps/web/src/api/task-contract.ts`、任务 URL 状态、组件/应用测试与时间线样式。
+
+**实施提交：**`581994a`、`71cf057`、`b36918f`、`28e29c6`、`6366123`、`0e0c29c`。
 
 **工作量：**中等。
 
