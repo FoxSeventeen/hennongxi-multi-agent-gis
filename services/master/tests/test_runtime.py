@@ -3,10 +3,16 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Mapping
 from threading import Event
-from typing import Any
+from typing import Any, cast
 
 from fastapi.testclient import TestClient
+from hennongxi_master.amap import AmapStudyAreaVerifier
 from hennongxi_master.main import create_master_app
+from hennongxi_master.orchestrator import TaskOrchestrator
+from hennongxi_master.repository import TaskRepository
+from hennongxi_master.runtime import create_worker_runtime
+from hennongxi_master.study_area import StudyAreaGrounder
+from hennongxi_master.worker import WorkerConfig
 
 
 class _Repository:
@@ -69,3 +75,41 @@ def test_enabled_worker_starts_and_closes_lifespan_runtime() -> None:
 
     assert runtime.worker.stopped.wait(timeout=1)
     assert runtime.closed is True
+
+
+def test_worker_runtime_keeps_online_grounding_optional_when_unconfigured() -> None:
+    runtime = create_worker_runtime(
+        cast(TaskRepository, _Repository()),
+        WorkerConfig.from_environment(_environment(True)),
+        _environment(True),
+    )
+    runner = cast(TaskOrchestrator, runtime.worker._runner)
+    grounder = cast(StudyAreaGrounder, runner._study_area_grounder)
+
+    assert grounder.online_verifier is None
+    assert len(runtime.http_clients) == 1
+
+    asyncio.run(runtime.close())
+
+
+def test_worker_runtime_injects_bounded_amap_verifier_only_into_master() -> None:
+    environment = {
+        **_environment(True),
+        "AMAP_WEB_SERVICE_KEY": "test-amap-runtime-key",
+        "AMAP_TIMEOUT_SECONDS": "2.5",
+    }
+
+    runtime = create_worker_runtime(
+        cast(TaskRepository, _Repository()),
+        WorkerConfig.from_environment(environment),
+        environment,
+    )
+    runner = cast(TaskOrchestrator, runtime.worker._runner)
+    grounder = cast(StudyAreaGrounder, runner._study_area_grounder)
+
+    assert isinstance(grounder.online_verifier, AmapStudyAreaVerifier)
+    assert len(runtime.http_clients) == 2
+    assert "test-amap-runtime-key" not in repr(grounder)
+    assert "test-amap-runtime-key" not in repr(runtime)
+
+    asyncio.run(runtime.close())

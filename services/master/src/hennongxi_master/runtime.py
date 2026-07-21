@@ -14,6 +14,11 @@ from hennongxi_master.agent_client import (
     AgentHttpClient,
     create_agent_async_client,
 )
+from hennongxi_master.amap import (
+    AmapConfig,
+    AmapConfigurationError,
+    AmapStudyAreaVerifier,
+)
 from hennongxi_master.llm import (
     LlmConfig,
     LlmConfigurationError,
@@ -21,6 +26,7 @@ from hennongxi_master.llm import (
 )
 from hennongxi_master.orchestrator import EventPublisher, TaskOrchestrator
 from hennongxi_master.repository import TaskRepository
+from hennongxi_master.study_area import StudyAreaGrounder
 from hennongxi_master.worker import OrchestrationWorker, RecoveryTaskPlanner, WorkerConfig
 
 _LOGGER = structlog.get_logger("hennongxi.master.runtime")
@@ -57,12 +63,28 @@ def create_worker_runtime(
         http_clients.append(llm_http_client)
         llm_adapter = LlmPlanningAdapter(llm_config, llm_http_client)
 
+    try:
+        amap_config = AmapConfig.from_environment(environment)
+    except AmapConfigurationError:
+        study_area_grounder = StudyAreaGrounder(None)
+        _LOGGER.warning(
+            "study_area_online_check_unconfigured",
+            reason_code="ONLINE_CHECK_NOT_CONFIGURED",
+        )
+    else:
+        amap_http_client = _create_amap_async_client(amap_config)
+        http_clients.append(amap_http_client)
+        study_area_grounder = StudyAreaGrounder(
+            AmapStudyAreaVerifier(amap_config, amap_http_client)
+        )
+
     planner = RecoveryTaskPlanner(llm_adapter)
     orchestrator = TaskOrchestrator(
         repository,
         AgentHttpClient(agent_config, agent_http_client),
         planner,
         event_publisher,
+        study_area_grounder=study_area_grounder,
     )
     return MasterWorkerRuntime(
         worker=OrchestrationWorker(repository, orchestrator, config),
@@ -73,6 +95,15 @@ def create_worker_runtime(
 def _create_llm_async_client(config: LlmConfig) -> httpx.AsyncClient:
     # Sources: https://www.python-httpx.org/async/#opening-and-closing-clients
     # and https://www.python-httpx.org/advanced/clients/#why-use-a-client
+    return httpx.AsyncClient(
+        timeout=httpx.Timeout(config.timeout_seconds),
+        limits=httpx.Limits(max_connections=2, max_keepalive_connections=1),
+        follow_redirects=False,
+        trust_env=False,
+    )
+
+
+def _create_amap_async_client(config: AmapConfig) -> httpx.AsyncClient:
     return httpx.AsyncClient(
         timeout=httpx.Timeout(config.timeout_seconds),
         limits=httpx.Limits(max_connections=2, max_keepalive_connections=1),
