@@ -22,6 +22,7 @@ dist/
 coverage/
 playwright-report/
 test-results/
+*.tsbuildinfo
 
 # Runtime data and generated artifacts
 data/raw/

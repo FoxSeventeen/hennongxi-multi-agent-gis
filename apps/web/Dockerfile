@@ -12,7 +12,7 @@ WORKDIR /app
 
 USER node
 
-COPY --chown=node:node package.json pnpm-lock.yaml ./
+COPY --chown=node:node package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN --mount=type=cache,id=hennongxi-pnpm,target=/pnpm/store,uid=1000,gid=1000 \
     pnpm install --frozen-lockfile
 
