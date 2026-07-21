@@ -45,7 +45,7 @@
 }
 
 .task-composer textarea::placeholder {
-  color: #74827d;
+  color: #687872;
 }
 
 .task-composer textarea[aria-invalid="true"] {

@@ -104,4 +104,36 @@ describe("task submission composer", () => {
     expect(screen.getByText("系统就绪后才可创建任务")).toBeVisible();
     expect(createTask).not.toHaveBeenCalled();
   });
+
+  it("supports the complete keyboard focus and submit path", async () => {
+    const createTask = vi.fn<MasterClient["createTask"]>().mockResolvedValue(acceptedTask);
+    const user = userEvent.setup();
+    render(<TaskComposer client={createClient(createTask)} canSubmit onAccepted={vi.fn()} />);
+
+    await user.tab();
+    const taskInput = screen.getByRole("textbox", { name: "生态监测任务描述" });
+    expect(taskInput).toHaveFocus();
+    await user.type(taskInput, "分析神农溪植被变化");
+    await user.tab();
+    expect(screen.getByRole("button", { name: "创建监测任务" })).toHaveFocus();
+    await user.keyboard("{Enter}");
+
+    expect(await screen.findByRole("status")).toHaveTextContent("任务已创建");
+    expect(createTask).toHaveBeenCalledOnce();
+  });
+
+  it("announces blank input validation without calling Master", async () => {
+    const createTask = vi.fn<MasterClient["createTask"]>();
+    const user = userEvent.setup();
+    render(<TaskComposer client={createClient(createTask)} canSubmit onAccepted={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: "创建监测任务" }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent("请输入需要分析的生态监测任务");
+    expect(screen.getByRole("textbox", { name: "生态监测任务描述" })).toHaveAttribute(
+      "aria-invalid",
+      "true",
+    );
+    expect(createTask).not.toHaveBeenCalled();
+  });
 });

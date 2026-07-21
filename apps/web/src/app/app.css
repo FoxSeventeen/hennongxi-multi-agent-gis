@@ -43,7 +43,7 @@ button:focus-visible,
 textarea:focus-visible,
 input:focus-visible,
 [tabindex]:focus-visible {
-  outline: 3px solid #f0b64e;
+  outline: 3px solid #0b5b49;
   outline-offset: 3px;
 }
 
@@ -150,7 +150,7 @@ input:focus-visible,
 
 .map-heading .section-kicker,
 .panel-heading .section-kicker {
-  color: #71827c;
+  color: var(--ink-muted);
 }
 
 .map-state {
@@ -328,7 +328,7 @@ input:focus-visible,
 }
 
 .panel-index {
-  color: #81918b;
+  color: var(--ink-muted);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.72rem;
 }
