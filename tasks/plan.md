@@ -560,14 +560,15 @@ The critical path is contracts → persistence/events → raster chain → orche
 
 **验收标准：**
 
-- [ ] 只有 `FAILED` 任务可重试；新尝试从失败后的安全检查点恢复，并保留此前所有事件和成果历史。
-- [ ] 并发或重复重试请求具备幂等性；上游成果无效时必须重新计算，不能不安全复用。
-- [ ] 分析期间重启 Master 会产生可恢复或明确失败状态，随后可到达正确终态且不会重复完成步骤。
+- [x] 只有 `FAILED` 任务可重试；新尝试从失败后的安全检查点恢复，并保留此前所有事件和成果历史。
+- [x] 并发或重复重试请求具备幂等性；上游成果无效时必须重新计算，不能不安全复用。
+- [x] 分析期间重启 Master 会产生可恢复或明确失败状态，随后可到达正确终态且不会重复完成步骤。
 
 **验证：**
 
-- [ ] `docker compose run --rm master-agent pytest services/master/tests/integration/test_retry_recovery.py -q`
-- [ ] Data、Analysis、Quality、Publisher 的强制失败均从预期检查点恢复。
+- [x] `docker compose run --rm master-agent pytest services/master/tests/integration/test_retry_recovery.py -q`
+- [x] Data、Analysis、Quality、Publisher 的强制失败均从预期检查点恢复。
+- [x] 6 个 PostGIS 重试/恢复集成场景通过；全仓回归为 348 项通过、4 项按环境条件跳过，Ruff、120 个文件的格式检查和 56 个生产源码文件的严格类型检查通过。
 
 **依赖：**T16、T17。
 
@@ -577,9 +578,9 @@ The critical path is contracts → persistence/events → raster chain → orche
 
 #### 检查点 F：具备恢复能力的后端流程
 
-- [ ] T16-T18 的完整运行、强制失败、重试、刷新和 Master 重启验证通过。
-- [ ] 不把任何失败路径显示为成功，且尝试历史始终可查询。
-- [ ] 使用一个关联标识即可重建完整的跨容器工作流。
+- [x] T16-T18 的完整运行、强制失败、重试、刷新和 Master 重启验证通过。
+- [x] 不把任何失败路径显示为成功，且尝试历史始终可查询。
+- [x] 使用一个关联标识即可重建完整的跨容器工作流。
 
 ### Phase 7: Chinese operational Web experience
 
