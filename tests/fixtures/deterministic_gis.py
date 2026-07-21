@@ -58,7 +58,10 @@ def write_deterministic_gis_fixture(root: Path) -> DeterministicGisFixture:
                 "features": [
                     {
                         "type": "Feature",
-                        "properties": {"name": "deterministic watershed"},
+                        "properties": {
+                            "name": "deterministic watershed",
+                            "name_zh": "神农溪流域",
+                        },
                         "geometry": {
                             "type": "Polygon",
                             "coordinates": [

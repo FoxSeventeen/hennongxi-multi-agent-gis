@@ -16,7 +16,10 @@ export const test = base.extend<Diagnostics>({
   browserMessages: async ({ page }, use, testInfo) => {
     const browserMessages: string[] = [];
     page.on("console", (message) => {
-      if (message.type() === "error" || message.type() === "warning") {
+      if (
+        (message.type() === "error" || message.type() === "warning") &&
+        !isHeadlessWebGlDriverDiagnostic(message.text())
+      ) {
         browserMessages.push(`${message.type()}: ${message.text()}`);
       }
     });
@@ -44,6 +47,10 @@ export const test = base.extend<Diagnostics>({
 });
 
 export { expect };
+
+function isHeadlessWebGlDriverDiagnostic(message: string): boolean {
+  return message.includes("GL Driver Message") && message.includes("GPU stall due to ReadPixels");
+}
 
 async function startProxy(target: (typeof proxyTargets)[number]): Promise<Server> {
   const server = createServer((incoming, outgoing) => {

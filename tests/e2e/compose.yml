@@ -1,0 +1,162 @@
+services:
+  web:
+    ports: !reset []
+
+  master-agent:
+    environment:
+      APP_ENV: test
+      LLM_API_KEY: deterministic-e2e-key
+      LLM_BASE_URL: http://e2e-support:8999/v1
+      LLM_MODEL: deterministic-e2e
+      LLM_TIMEOUT_SECONDS: 5
+      AMAP_WEB_SERVICE_KEY: ""
+      DATA_MANIFEST_PATH: /e2e/data/manifest.json
+      ORCHESTRATION_POLL_SECONDS: 0.05
+    ports: !reset []
+    volumes:
+      - type: volume
+        source: e2e-data
+        target: /e2e
+        read_only: true
+    depends_on:
+      e2e-migrate:
+        condition: service_completed_successfully
+      e2e-seed:
+        condition: service_completed_successfully
+      e2e-support:
+        condition: service_healthy
+
+  data-agent:
+    environment:
+      APP_ENV: test
+      DATA_MANIFEST_PATH: /e2e/data/manifest.json
+      DATA_CACHE_DIR: /e2e/cache
+    volumes:
+      - type: volume
+        source: e2e-data
+        target: /e2e
+        read_only: true
+    depends_on:
+      e2e-seed:
+        condition: service_completed_successfully
+
+  analysis-agent:
+    environment:
+      APP_ENV: test
+      DATA_MANIFEST_PATH: /e2e/data/manifest.json
+      DATA_CACHE_DIR: /e2e/cache
+    volumes:
+      - type: volume
+        source: e2e-data
+        target: /e2e
+        read_only: true
+    depends_on:
+      e2e-seed:
+        condition: service_completed_successfully
+
+  quality-agent:
+    environment:
+      APP_ENV: test
+      DATA_MANIFEST_PATH: /e2e/data/manifest.json
+    volumes:
+      - type: volume
+        source: e2e-data
+        target: /e2e
+        read_only: true
+    depends_on:
+      e2e-seed:
+        condition: service_completed_successfully
+
+  publisher-agent:
+    environment:
+      APP_ENV: test
+      DATA_MANIFEST_PATH: /e2e/data/manifest.json
+    ports: !reset []
+    volumes:
+      - type: volume
+        source: e2e-data
+        target: /e2e
+        read_only: true
+    depends_on:
+      e2e-seed:
+        condition: service_completed_successfully
+
+  e2e-seed:
+    image: hennongxi/backend:0.1.0
+    platform: ${TARGET_PLATFORM:-linux/arm64}
+    user: "0:0"
+    command: ["python", "-m", "tests.e2e.seed"]
+    init: true
+    restart: "no"
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - private
+    volumes:
+      - type: volume
+        source: e2e-data
+        target: /e2e
+
+  e2e-migrate:
+    image: hennongxi/backend:0.1.0
+    platform: ${TARGET_PLATFORM:-linux/arm64}
+    command: ["alembic", "upgrade", "head"]
+    init: true
+    restart: "no"
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    environment:
+      DATABASE_URL: postgresql+asyncpg://hennongxi:local-development-only@postgis:5432/hennongxi
+    networks:
+      - private
+    depends_on:
+      postgis:
+        condition: service_healthy
+
+  e2e-support:
+    image: hennongxi/backend:0.1.0
+    platform: ${TARGET_PLATFORM:-linux/arm64}
+    command:
+      - uvicorn
+      - tests.e2e.support:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8999"
+      - --no-access-log
+    init: true
+    restart: "no"
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - private
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8999/health', timeout=2)
+      interval: 2s
+      timeout: 2s
+      retries: 10
+      start_period: 2s
+
+volumes:
+  e2e-data:
