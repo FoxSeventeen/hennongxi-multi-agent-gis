@@ -9,7 +9,11 @@ from uuid import UUID
 from pydantic import Field, model_validator
 
 from hennongxi_contracts.artifacts import ArtifactRef
-from hennongxi_contracts.commands import PublisherPublishResult
+from hennongxi_contracts.commands import (
+    AnalysisRunResult,
+    PublisherPublishResult,
+    QualityEvaluateResult,
+)
 from hennongxi_contracts.common import (
     AgentName,
     ContractModel,
@@ -98,6 +102,8 @@ class TaskResponse(ContractModel):
     steps: tuple[TaskStep, ...] = ()
     artifacts: tuple[ArtifactRef, ...] = ()
     last_error: StructuredError | None = None
+    analysis: AnalysisRunResult | None = None
+    quality: QualityEvaluateResult | None = None
     publication: PublisherPublishResult | None = None
 
     @model_validator(mode="after")
@@ -120,6 +126,18 @@ class TaskResponse(ContractModel):
             for artifact in step.artifacts
         ):
             raise ValueError("step artifacts must belong to the same task and attempt")
+        if self.analysis is not None and (
+            self.analysis.task_id != self.task_id
+            or self.analysis.attempt != self.current_attempt
+            or self.analysis.correlation_id != self.correlation_id
+        ):
+            raise ValueError("analysis must belong to the current task attempt")
+        if self.quality is not None and (
+            self.quality.task_id != self.task_id
+            or self.quality.attempt != self.current_attempt
+            or self.quality.correlation_id != self.correlation_id
+        ):
+            raise ValueError("quality must belong to the current task attempt")
         if self.publication is not None and (
             self.publication.task_id != self.task_id
             or self.publication.attempt != self.current_attempt

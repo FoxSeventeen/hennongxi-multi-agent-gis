@@ -68,6 +68,12 @@ const publication: TaskPublication = {
   taskId,
   attempt: 1,
   correlationId: "f399c36a-6b76-4db5-a831-ebf6a170edf1",
+  report: {
+    artifactId: "55555555-5555-4555-8555-555555555555",
+    createdAt: "2024-08-12T08:30:03Z",
+    checksumSha256: "b".repeat(64),
+    byteSize: 1024,
+  },
   resources: [
     ["NDVI_BEFORE", "2019-08-19", "2019-08-19"],
     ["NDVI_AFTER", "2024-08-12", "2024-08-12"],

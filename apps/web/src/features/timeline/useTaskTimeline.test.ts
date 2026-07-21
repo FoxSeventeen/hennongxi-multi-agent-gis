@@ -21,6 +21,8 @@ function snapshot(status: TaskStatus, progress: number): TaskSnapshot {
     plan: null,
     steps: [],
     lastError: null,
+    analysis: null,
+    quality: null,
     publication: null,
   };
 }
@@ -50,6 +52,7 @@ function client(options: {
     getReadiness: vi.fn(),
     createTask: vi.fn(),
     getTask: options.getTask,
+    retryTask: vi.fn(),
     streamTaskEvents: options.streamTaskEvents,
   };
 }

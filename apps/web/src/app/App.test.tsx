@@ -40,6 +40,7 @@ function createClient(overrides: Partial<MasterClient> = {}): MasterClient {
     getReadiness: vi.fn().mockResolvedValue(readySnapshot),
     createTask: vi.fn(),
     getTask: vi.fn(),
+    retryTask: vi.fn(),
     streamTaskEvents: vi.fn(),
     ...overrides,
   };
@@ -113,6 +114,8 @@ describe("readiness application shell", () => {
       plan: null,
       steps: [],
       lastError: null,
+      analysis: null,
+      quality: null,
       publication: null,
     };
     const terminalEvent: TaskEvent = {
@@ -165,6 +168,8 @@ describe("readiness application shell", () => {
       plan: null,
       steps: [],
       lastError: null,
+      analysis: null,
+      quality: null,
       publication: null,
     };
     const createTask = vi.fn<MasterClient["createTask"]>().mockResolvedValue(acceptedTask);

@@ -111,6 +111,92 @@ function publisherPublication() {
   };
 }
 
+function analysisResult() {
+  const artifactTypes = [
+    "NDVI_BEFORE",
+    "NDVI_AFTER",
+    "NDVI_DIFFERENCE",
+    "CHANGE_CLASSIFICATION",
+    "AREA_STATISTICS",
+  ] as const;
+  const artifactIds = [
+    "66666666-6666-4666-8666-666666666666",
+    "77777777-7777-4777-8777-777777777777",
+    "88888888-8888-4888-8888-888888888888",
+    "99999999-9999-4999-8999-999999999999",
+    "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  ] as const;
+  return {
+    schema_version: "1.0",
+    task_id: taskId,
+    step_id: "analyze_ndvi_change",
+    attempt: 1,
+    correlation_id: correlationId,
+    artifacts: artifactTypes.map((artifactType, index) => ({
+      schema_version: "1.0",
+      artifact_id: artifactIds[index],
+      task_id: taskId,
+      attempt: 1,
+      artifact_type: artifactType,
+      status: "COMPLETE",
+      media_type:
+        artifactType === "AREA_STATISTICS"
+          ? "application/json"
+          : "image/tiff; application=geotiff",
+      created_at: "2024-08-12T08:30:02Z",
+      checksum_sha256: "c".repeat(64),
+      byte_size: 2048,
+    })),
+    statistics: {
+      schema_version: "1.0",
+      increase_hectares: 128.4,
+      stable_hectares: 702.6,
+      decrease_hectares: 54.2,
+      valid_hectares: 885.2,
+    },
+    elapsed_ms: 1320,
+  };
+}
+
+function qualityResult() {
+  return {
+    schema_version: "1.0",
+    task_id: taskId,
+    step_id: "evaluate_quality",
+    attempt: 1,
+    correlation_id: correlationId,
+    metrics: {
+      schema_version: "1.0",
+      coverage_ratio: 0.982,
+      valid_pixel_ratio: 0.961,
+      output_complete: true,
+      elapsed_ms: 1320,
+      thresholds: {
+        schema_version: "1.0",
+        minimum_watershed_coverage_ratio: 0.95,
+        minimum_valid_pixel_ratio: 0.9,
+        output_complete_required: true,
+        elapsed_minimum_ms: 0,
+      },
+      conclusion: "PASS",
+      passed: true,
+      evidence: ["范围通过", "像元通过", "成果完整", "耗时已记录"],
+    },
+    artifact: {
+      schema_version: "1.0",
+      artifact_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      task_id: taskId,
+      attempt: 1,
+      artifact_type: "QUALITY_REPORT",
+      status: "COMPLETE",
+      media_type: "application/json",
+      created_at: "2024-08-12T08:30:02Z",
+      checksum_sha256: "d".repeat(64),
+      byte_size: 512,
+    },
+  };
+}
+
 describe("task polling client", () => {
   it("maps the approved task, plan, and step fields to component-safe names", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
@@ -171,6 +257,8 @@ describe("task polling client", () => {
         ],
         artifacts: [],
         last_error: null,
+        analysis: analysisResult(),
+        quality: qualityResult(),
         publication: publisherPublication(),
       }),
     );
@@ -206,9 +294,29 @@ describe("task polling client", () => {
         },
       ],
       lastError: null,
+      analysis: {
+        statistics: {
+          increaseHectares: 128.4,
+          stableHectares: 702.6,
+          decreaseHectares: 54.2,
+          validHectares: 885.2,
+        },
+        elapsedMs: 1320,
+      },
+      quality: {
+        coverageRatio: 0.982,
+        validPixelRatio: 0.961,
+        outputComplete: true,
+        conclusion: "PASS",
+        passed: true,
+      },
       publication: {
         taskId,
         attempt: 1,
+        report: {
+          artifactId: "55555555-5555-4555-8555-555555555555",
+          byteSize: 1024,
+        },
       },
     });
     const beforeResource = result.publication?.resources.find(

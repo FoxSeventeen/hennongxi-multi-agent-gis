@@ -7,12 +7,17 @@ export type StepStatus = components["schemas"]["StepStatus"];
 export type TaskStatus = components["schemas"]["TaskStatus"];
 
 type ArtifactRefWire = components["schemas"]["ArtifactRef"];
+type AnalysisRunResultWire = components["schemas"]["AnalysisRunResult"];
+type AreaStatisticsWire = components["schemas"]["AreaStatistics"];
 type ErrorDetailWire = components["schemas"]["ErrorDetail"];
 type ExecutionPlanWire = components["schemas"]["ExecutionPlan"];
 type ModelCallRecordWire = components["schemas"]["ModelCallRecord"];
 type PlanStepWire = components["schemas"]["PlanStep"];
 type PublishedResourceWire = components["schemas"]["PublishedResource"];
 type PublisherPublishResultWire = components["schemas"]["PublisherPublishResult"];
+type QualityEvaluateResultWire = components["schemas"]["QualityEvaluateResult"];
+type QualityMetricsWire = components["schemas"]["QualityMetrics"];
+type QualityThresholdsWire = components["schemas"]["QualityThresholds"];
 type StructuredErrorWire = components["schemas"]["StructuredError"];
 type TaskEventWire = components["schemas"]["TaskEvent"];
 type TaskResponseWire = components["schemas"]["TaskResponse"];
@@ -101,6 +106,48 @@ export interface TaskPublication {
   readonly attempt: number;
   readonly correlationId: string;
   readonly resources: readonly TaskPublishedResource[];
+  readonly report: TaskReport;
+}
+
+export interface TaskReport {
+  readonly artifactId: string;
+  readonly createdAt: string;
+  readonly checksumSha256: string;
+  readonly byteSize: number;
+}
+
+export interface TaskAreaStatistics {
+  readonly increaseHectares: number;
+  readonly stableHectares: number;
+  readonly decreaseHectares: number;
+  readonly validHectares: number;
+}
+
+export interface TaskAnalysisResult {
+  readonly taskId: string;
+  readonly attempt: number;
+  readonly correlationId: string;
+  readonly statistics: TaskAreaStatistics;
+  readonly elapsedMs: number;
+}
+
+export interface TaskQualityThresholds {
+  readonly minimumWatershedCoverageRatio: number;
+  readonly minimumValidPixelRatio: number;
+}
+
+export interface TaskQualityResult {
+  readonly taskId: string;
+  readonly attempt: number;
+  readonly correlationId: string;
+  readonly coverageRatio: number;
+  readonly validPixelRatio: number;
+  readonly outputComplete: boolean;
+  readonly elapsedMs: number;
+  readonly thresholds: TaskQualityThresholds;
+  readonly conclusion: components["schemas"]["QualityConclusion"];
+  readonly passed: boolean;
+  readonly evidence: readonly string[];
 }
 
 export interface TaskSnapshot {
@@ -115,6 +162,8 @@ export interface TaskSnapshot {
   readonly plan: TaskPlan | null;
   readonly steps: readonly TaskStep[];
   readonly lastError: TimelineError | null;
+  readonly analysis: TaskAnalysisResult | null;
+  readonly quality: TaskQualityResult | null;
   readonly publication: TaskPublication | null;
 }
 
@@ -196,6 +245,14 @@ export function parseTaskSnapshot(value: unknown, expectedTaskId: string): TaskS
   if (
     !isTaskResponse(value) ||
     value.task_id !== expectedTaskId ||
+    (value.analysis != null &&
+      (value.analysis.task_id !== value.task_id ||
+        value.analysis.attempt !== value.current_attempt ||
+        value.analysis.correlation_id !== value.correlation_id)) ||
+    (value.quality != null &&
+      (value.quality.task_id !== value.task_id ||
+        value.quality.attempt !== value.current_attempt ||
+        value.quality.correlation_id !== value.correlation_id)) ||
     (value.publication != null &&
       (value.publication.task_id !== value.task_id ||
         value.publication.attempt !== value.current_attempt ||
@@ -215,6 +272,8 @@ export function parseTaskSnapshot(value: unknown, expectedTaskId: string): TaskS
     plan: value.plan == null ? null : mapPlan(value.plan),
     steps: value.steps.map(mapTaskStep),
     lastError: value.last_error == null ? null : mapError(value.last_error),
+    analysis: value.analysis == null ? null : mapAnalysis(value.analysis),
+    quality: value.quality == null ? null : mapQuality(value.quality),
     publication: value.publication == null ? null : mapPublication(value.publication),
   };
 }
@@ -294,6 +353,46 @@ function mapPublication(value: PublisherPublishResultWire): TaskPublication {
     attempt: value.attempt,
     correlationId: value.correlation_id,
     resources: value.resources.map(mapPublishedResource),
+    report: {
+      artifactId: value.report.artifact_id,
+      createdAt: value.report.created_at,
+      checksumSha256: value.report.checksum_sha256 ?? "",
+      byteSize: value.report.byte_size ?? 0,
+    },
+  };
+}
+
+function mapAnalysis(value: AnalysisRunResultWire): TaskAnalysisResult {
+  return {
+    taskId: value.task_id,
+    attempt: value.attempt,
+    correlationId: value.correlation_id,
+    statistics: {
+      increaseHectares: value.statistics.increase_hectares,
+      stableHectares: value.statistics.stable_hectares,
+      decreaseHectares: value.statistics.decrease_hectares,
+      validHectares: value.statistics.valid_hectares,
+    },
+    elapsedMs: value.elapsed_ms,
+  };
+}
+
+function mapQuality(value: QualityEvaluateResultWire): TaskQualityResult {
+  return {
+    taskId: value.task_id,
+    attempt: value.attempt,
+    correlationId: value.correlation_id,
+    coverageRatio: value.metrics.coverage_ratio,
+    validPixelRatio: value.metrics.valid_pixel_ratio,
+    outputComplete: value.metrics.output_complete,
+    elapsedMs: value.metrics.elapsed_ms,
+    thresholds: {
+      minimumWatershedCoverageRatio: value.metrics.thresholds.minimum_watershed_coverage_ratio,
+      minimumValidPixelRatio: value.metrics.thresholds.minimum_valid_pixel_ratio,
+    },
+    conclusion: value.metrics.conclusion,
+    passed: value.metrics.passed,
+    evidence: value.metrics.evidence,
   };
 }
 
@@ -350,6 +449,8 @@ function isTaskResponse(value: unknown): value is TaskResponseWire {
       "steps",
       "artifacts",
       "last_error",
+      "analysis",
+      "quality",
       "publication",
     ]) &&
     hasSchemaVersion(value) &&
@@ -365,7 +466,153 @@ function isTaskResponse(value: unknown): value is TaskResponseWire {
     isArrayOf(value["steps"], isTaskStep) &&
     isArrayOf(value["artifacts"], isArtifactRef) &&
     isOptionalNullable(value["last_error"], isStructuredError) &&
+    isOptionalNullable(value["analysis"], isAnalysisRunResult) &&
+    isOptionalNullable(value["quality"], isQualityEvaluateResult) &&
     isOptionalNullable(value["publication"], isPublisherPublishResult)
+  );
+}
+
+function isAnalysisRunResult(value: unknown): value is AnalysisRunResultWire {
+  if (
+    !isRecordWithKeys(value, [
+      "schema_version",
+      "task_id",
+      "step_id",
+      "attempt",
+      "correlation_id",
+      "artifacts",
+      "statistics",
+      "elapsed_ms",
+    ]) ||
+    !hasSchemaVersion(value) ||
+    !isUuid(value["task_id"]) ||
+    value["step_id"] !== "analyze_ndvi_change" ||
+    !isIntegerBetween(value["attempt"], 1, Number.MAX_SAFE_INTEGER) ||
+    !isUuid(value["correlation_id"]) ||
+    !isArrayOf(value["artifacts"], isArtifactRef) ||
+    !isAreaStatistics(value["statistics"]) ||
+    !isNonNegativeInteger(value["elapsed_ms"])
+  ) {
+    return false;
+  }
+  const requiredTypes = new Set([
+    "NDVI_BEFORE",
+    "NDVI_AFTER",
+    "NDVI_DIFFERENCE",
+    "CHANGE_CLASSIFICATION",
+    "AREA_STATISTICS",
+  ]);
+  const artifacts = value["artifacts"];
+  return (
+    artifacts.length === requiredTypes.size &&
+    new Set(artifacts.map((artifact) => artifact.artifact_type)).size === requiredTypes.size &&
+    artifacts.every(
+      (artifact) =>
+        artifact.task_id === value["task_id"] &&
+        artifact.attempt === value["attempt"] &&
+        artifact.status === "COMPLETE" &&
+        requiredTypes.has(artifact.artifact_type),
+    )
+  );
+}
+
+function isAreaStatistics(value: unknown): value is AreaStatisticsWire {
+  return (
+    isRecordWithKeys(value, [
+      "schema_version",
+      "increase_hectares",
+      "stable_hectares",
+      "decrease_hectares",
+      "valid_hectares",
+    ]) &&
+    hasSchemaVersion(value) &&
+    isFiniteNumberAtLeast(value["increase_hectares"], 0) &&
+    isFiniteNumberAtLeast(value["stable_hectares"], 0) &&
+    isFiniteNumberAtLeast(value["decrease_hectares"], 0) &&
+    isFiniteNumberAtLeast(value["valid_hectares"], Number.MIN_VALUE)
+  );
+}
+
+function isQualityEvaluateResult(value: unknown): value is QualityEvaluateResultWire {
+  if (
+    !isRecordWithKeys(value, [
+      "schema_version",
+      "task_id",
+      "step_id",
+      "attempt",
+      "correlation_id",
+      "metrics",
+      "artifact",
+    ]) ||
+    !hasSchemaVersion(value) ||
+    !isUuid(value["task_id"]) ||
+    value["step_id"] !== "evaluate_quality" ||
+    !isIntegerBetween(value["attempt"], 1, Number.MAX_SAFE_INTEGER) ||
+    !isUuid(value["correlation_id"]) ||
+    !isQualityMetrics(value["metrics"]) ||
+    !isArtifactRef(value["artifact"])
+  ) {
+    return false;
+  }
+  const artifact = value["artifact"];
+  return (
+    artifact.task_id === value["task_id"] &&
+    artifact.attempt === value["attempt"] &&
+    artifact.artifact_type === "QUALITY_REPORT" &&
+    artifact.status === "COMPLETE" &&
+    artifact.media_type === "application/json"
+  );
+}
+
+function isQualityMetrics(value: unknown): value is QualityMetricsWire {
+  if (
+    !isRecordWithKeys(value, [
+      "schema_version",
+      "coverage_ratio",
+      "valid_pixel_ratio",
+      "output_complete",
+      "elapsed_ms",
+      "thresholds",
+      "conclusion",
+      "passed",
+      "evidence",
+    ]) ||
+    !hasSchemaVersion(value) ||
+    !isFiniteNumberBetween(value["coverage_ratio"], 0, 1) ||
+    !isFiniteNumberBetween(value["valid_pixel_ratio"], 0, 1) ||
+    typeof value["output_complete"] !== "boolean" ||
+    !isNonNegativeInteger(value["elapsed_ms"]) ||
+    !isQualityThresholds(value["thresholds"]) ||
+    !["PASS", "WARN", "FAIL"].includes(String(value["conclusion"])) ||
+    typeof value["passed"] !== "boolean" ||
+    !isArrayOf(value["evidence"], (item): item is string => isBoundedText(item, 200)) ||
+    value["evidence"].length < 4
+  ) {
+    return false;
+  }
+  const isPass = value["conclusion"] === "PASS";
+  const thresholds = value["thresholds"];
+  const gatesPass =
+    value["coverage_ratio"] >= thresholds.minimum_watershed_coverage_ratio &&
+    value["valid_pixel_ratio"] >= thresholds.minimum_valid_pixel_ratio &&
+    value["output_complete"];
+  return value["passed"] === isPass && (!isPass || gatesPass);
+}
+
+function isQualityThresholds(value: unknown): value is QualityThresholdsWire {
+  return (
+    isRecordWithKeys(value, [
+      "schema_version",
+      "minimum_watershed_coverage_ratio",
+      "minimum_valid_pixel_ratio",
+      "output_complete_required",
+      "elapsed_minimum_ms",
+    ]) &&
+    hasSchemaVersion(value) &&
+    isFiniteNumberBetween(value["minimum_watershed_coverage_ratio"], 0, 1) &&
+    isFiniteNumberBetween(value["minimum_valid_pixel_ratio"], 0, 1) &&
+    value["output_complete_required"] === true &&
+    value["elapsed_minimum_ms"] === 0
   );
 }
 
@@ -411,6 +658,8 @@ function isPublisherPublishResult(value: unknown): value is PublisherPublishResu
     report.artifact_type === "PDF_REPORT" &&
     report.status === "COMPLETE" &&
     report.media_type === "application/pdf" &&
+    isSha256(report.checksum_sha256) &&
+    isPositiveInteger(report.byte_size) &&
     resources.length === 5 &&
     tileResources.length === tileArtifactTypes.size &&
     publishedTypes.size === tileArtifactTypes.size &&
@@ -747,6 +996,14 @@ function isBoundedText(value: unknown, maximum: number): value is string {
 
 function isIntegerBetween(value: unknown, minimum: number, maximum: number): value is number {
   return Number.isSafeInteger(value) && Number(value) >= minimum && Number(value) <= maximum;
+}
+
+function isFiniteNumberBetween(value: unknown, minimum: number, maximum: number): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= minimum && value <= maximum;
+}
+
+function isFiniteNumberAtLeast(value: unknown, minimum: number): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= minimum;
 }
 
 function isNonNegativeInteger(value: unknown): value is number {

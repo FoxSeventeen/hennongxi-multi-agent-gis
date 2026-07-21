@@ -1145,6 +1145,29 @@ class TaskRepository:
                 _step_from_row(row, tuple(artifacts_by_step.get(str(row["step_id"]), ())))
                 for row in step_rows
             )
+            correlation_id = UUID(str(task["correlation_id"]))
+            analysis = _validated_step_output(
+                next(
+                    (row for row in step_rows if str(row["step_id"]) == "analyze_ndvi_change"),
+                    None,
+                ),
+                AnalysisRunResult,
+                task_id=task_id,
+                attempt=attempt,
+                step_id="analyze_ndvi_change",
+                correlation_id=correlation_id,
+            )
+            quality = _validated_step_output(
+                next(
+                    (row for row in step_rows if str(row["step_id"]) == "evaluate_quality"),
+                    None,
+                ),
+                QualityEvaluateResult,
+                task_id=task_id,
+                attempt=attempt,
+                step_id="evaluate_quality",
+                correlation_id=correlation_id,
+            )
             publication = _validated_step_output(
                 next(
                     (row for row in step_rows if str(row["step_id"]) == "publish_results"),
@@ -1154,7 +1177,7 @@ class TaskRepository:
                 task_id=task_id,
                 attempt=attempt,
                 step_id="publish_results",
-                correlation_id=UUID(str(task["correlation_id"])),
+                correlation_id=correlation_id,
             )
             all_artifacts = tuple(artifact for _, artifact in artifacts)
             last_error = (
@@ -1168,13 +1191,15 @@ class TaskRepository:
                 status=TaskStatus(str(task["status"])),
                 progress=int(task["progress"]),
                 current_attempt=attempt,
-                correlation_id=UUID(str(task["correlation_id"])),
+                correlation_id=correlation_id,
                 created_at=task["created_at"],
                 updated_at=task["updated_at"],
                 plan=plan,
                 steps=steps,
                 artifacts=all_artifacts,
                 last_error=last_error,
+                analysis=analysis,
+                quality=quality,
                 publication=publication,
             )
 

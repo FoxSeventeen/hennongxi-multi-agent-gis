@@ -947,6 +947,10 @@ async def test_retry_snapshot_loads_validated_upstream_outputs_without_new_model
             step_output=quality,
         )
     )
+    visible_results = await repository.get_task(TASK_ID)
+    assert visible_results is not None
+    assert visible_results.analysis == analysis
+    assert visible_results.quality == quality
     await repository.transition_task(
         TransitionCreate(
             task_id=TASK_ID,

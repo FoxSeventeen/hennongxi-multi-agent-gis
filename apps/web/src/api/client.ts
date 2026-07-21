@@ -18,6 +18,7 @@ type CreateTaskRequestWire = components["schemas"]["CreateTaskRequest"];
 type ErrorResponseWire = components["schemas"]["ErrorResponse"];
 type HealthResponseWire = components["schemas"]["HealthResponse"];
 type ReadinessResponseWire = components["schemas"]["ReadinessResponse"];
+type RetryAcceptedResponseWire = components["schemas"]["RetryAcceptedResponse"];
 type TaskAcceptedResponseWire = components["schemas"]["TaskAcceptedResponse"];
 
 export interface ErrorDetail {
@@ -53,6 +54,13 @@ export interface AcceptedTask {
   readonly createdAt: string;
 }
 
+export interface AcceptedRetry {
+  readonly taskId: string;
+  readonly attempt: number;
+  readonly status: TaskStatus;
+  readonly acceptedAt: string;
+}
+
 export class MasterApiError extends Error {
   readonly code: ErrorCode;
   readonly retryable: boolean;
@@ -76,6 +84,7 @@ export interface MasterClient {
   getReadiness(): Promise<ReadinessSnapshot>;
   createTask(query: string): Promise<AcceptedTask>;
   getTask(taskId: string): Promise<TaskSnapshot>;
+  retryTask(taskId: string): Promise<AcceptedRetry>;
   streamTaskEvents(taskId: string, options: StreamTaskEventsOptions): Promise<void>;
 }
 
@@ -201,6 +210,23 @@ export function createMasterClient(options: MasterClientOptions): MasterClient {
         throw invalidResponseError();
       }
       return snapshot;
+    },
+
+    async retryTask(taskId: string): Promise<AcceptedRetry> {
+      requireTaskId(taskId);
+      const payload = await requestJson(fetcher, `${baseUrl}/api/v1/tasks/${taskId}/retry`, {
+        method: "POST",
+        headers: { accept: "application/json" },
+      });
+      if (!isRetryAcceptedResponse(payload) || payload.task_id !== taskId) {
+        throw invalidResponseError();
+      }
+      return {
+        taskId: payload.task_id,
+        attempt: payload.attempt,
+        status: payload.status,
+        acceptedAt: payload.accepted_at,
+      };
     },
 
     async streamTaskEvents(taskId: string, streamOptions: StreamTaskEventsOptions): Promise<void> {
@@ -389,6 +415,20 @@ function isTaskAcceptedResponse(value: unknown): value is TaskAcceptedResponseWi
     value["status"] === "PENDING" &&
     typeof value["created_at"] === "string" &&
     Number.isFinite(Date.parse(value["created_at"]))
+  );
+}
+
+function isRetryAcceptedResponse(value: unknown): value is RetryAcceptedResponseWire {
+  return (
+    isRecord(value) &&
+    hasSchemaVersion(value) &&
+    typeof value["task_id"] === "string" &&
+    isTaskId(value["task_id"]) &&
+    Number.isSafeInteger(value["attempt"]) &&
+    Number(value["attempt"]) >= 2 &&
+    value["status"] === "PENDING" &&
+    typeof value["accepted_at"] === "string" &&
+    Number.isFinite(Date.parse(value["accepted_at"]))
   );
 }
 

@@ -877,3 +877,68 @@ def test_task_query_exposes_only_same_task_publication_metadata() -> None:
             updated_at=NOW,
             publication=publication,
         )
+
+
+def test_task_query_exposes_only_current_attempt_analysis_and_quality_results() -> None:
+    analysis = AnalysisRunResult(
+        task_id=TASK_ID,
+        step_id="analyze_ndvi_change",
+        attempt=1,
+        correlation_id=CORRELATION_ID,
+        artifacts=tuple(
+            valid_artifact(artifact_type=artifact_type)
+            for artifact_type in (
+                ArtifactType.NDVI_BEFORE,
+                ArtifactType.NDVI_AFTER,
+                ArtifactType.NDVI_DIFFERENCE,
+                ArtifactType.CHANGE_CLASSIFICATION,
+                ArtifactType.AREA_STATISTICS,
+            )
+        ),
+        statistics=AreaStatistics(
+            increase_hectares=10,
+            stable_hectares=20,
+            decrease_hectares=5,
+            valid_hectares=35,
+        ),
+        elapsed_ms=120,
+    )
+    quality = QualityEvaluateResult(
+        task_id=TASK_ID,
+        step_id="evaluate_quality",
+        attempt=1,
+        correlation_id=CORRELATION_ID,
+        metrics=_passing_quality(),
+        artifact=valid_artifact(artifact_type=ArtifactType.QUALITY_REPORT).model_copy(
+            update={"media_type": "application/json"}
+        ),
+    )
+    response = TaskResponse(
+        task_id=TASK_ID,
+        query="监测神农溪生态变化",
+        status=TaskStatus.PUBLISHING,
+        progress=80,
+        current_attempt=1,
+        correlation_id=CORRELATION_ID,
+        created_at=NOW,
+        updated_at=NOW,
+        analysis=analysis,
+        quality=quality,
+    )
+
+    assert response.analysis == analysis
+    assert response.quality == quality
+
+    for field, result in (("analysis", analysis), ("quality", quality)):
+        with pytest.raises(ValidationError, match=f"{field} must belong to the current task"):
+            TaskResponse(
+                task_id=TASK_ID,
+                query="监测神农溪生态变化",
+                status=TaskStatus.PENDING,
+                progress=0,
+                current_attempt=2,
+                correlation_id=CORRELATION_ID,
+                created_at=NOW,
+                updated_at=NOW,
+                **{field: result},
+            )

@@ -157,3 +157,44 @@ describe("task submission Master client", () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 });
+
+describe("task retry Master client", () => {
+  it("retries one failed task and maps the accepted attempt", async () => {
+    const taskId = "4f09fc09-6bd2-49fb-9636-7f4fb93baa44";
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      jsonResponse(
+        {
+          schema_version: "1.0",
+          task_id: taskId,
+          attempt: 2,
+          status: "PENDING",
+          accepted_at: "2024-08-12T08:31:00Z",
+        },
+        202,
+      ),
+    );
+    const client = createMasterClient({ baseUrl, fetcher });
+
+    await expect(client.retryTask(taskId)).resolves.toEqual({
+      taskId,
+      attempt: 2,
+      status: "PENDING",
+      acceptedAt: "2024-08-12T08:31:00Z",
+    });
+    expect(fetcher).toHaveBeenCalledWith(`${baseUrl}/api/v1/tasks/${taskId}/retry`, {
+      method: "POST",
+      headers: { accept: "application/json" },
+    });
+  });
+
+  it("rejects an invalid task ID before retrying", async () => {
+    const fetcher = vi.fn<typeof fetch>();
+    const client = createMasterClient({ baseUrl, fetcher });
+
+    await expect(client.retryTask("not-a-task")).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+      retryable: false,
+    });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+});

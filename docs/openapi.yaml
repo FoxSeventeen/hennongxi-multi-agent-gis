@@ -1776,6 +1776,14 @@ components:
           anyOf:
           - $ref: '#/components/schemas/StructuredError'
           - type: 'null'
+        analysis:
+          anyOf:
+          - $ref: '#/components/schemas/AnalysisRunResult'
+          - type: 'null'
+        quality:
+          anyOf:
+          - $ref: '#/components/schemas/QualityEvaluateResult'
+          - type: 'null'
         publication:
           anyOf:
           - $ref: '#/components/schemas/PublisherPublishResult'

@@ -40,6 +40,12 @@ function publication(resources: readonly TaskPublishedResource[]): TaskPublicati
     taskId,
     attempt: 1,
     correlationId: "f399c36a-6b76-4db5-a831-ebf6a170edf1",
+    report: {
+      artifactId: "55555555-5555-4555-8555-555555555555",
+      createdAt: "2024-08-12T08:30:03Z",
+      checksumSha256: "b".repeat(64),
+      byteSize: 1024,
+    },
     resources,
   };
 }

@@ -34,6 +34,7 @@ function createClient(createTask: MasterClient["createTask"]): MasterClient {
     createTask,
     getReadiness: vi.fn().mockResolvedValue(unusedReadiness),
     getTask: vi.fn(),
+    retryTask: vi.fn(),
     streamTaskEvents: vi.fn(),
   };
 }

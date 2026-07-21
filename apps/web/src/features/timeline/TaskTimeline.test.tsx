@@ -94,6 +94,8 @@ const failedSnapshot: TaskSnapshot = {
   },
   steps: taskSteps,
   lastError: taskSteps[1]?.error ?? null,
+  analysis: null,
+  quality: null,
   publication: null,
 };
 
