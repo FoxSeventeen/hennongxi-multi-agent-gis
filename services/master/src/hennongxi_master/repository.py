@@ -132,6 +132,20 @@ class TransitionCreate(RepositoryInput):
         return self
 
 
+class ProgressCreate(TransitionCreate):
+    """A durable progress event that must keep the task in its current active state."""
+
+    @model_validator(mode="after")
+    def require_nonterminal_step_progress(self) -> Self:
+        if self.target_status in {TaskStatus.COMPLETED, TaskStatus.FAILED}:
+            raise ValueError("same-state progress requires an active task status")
+        if self.step_status not in {StepStatus.RUNNING, StepStatus.COMPLETED}:
+            raise ValueError("same-state progress requires a running or completed step")
+        if self.step_status is StepStatus.RUNNING and self.artifact_ids:
+            raise ValueError("running step progress cannot publish artifacts")
+        return self
+
+
 class WorkerClaimRequest(RepositoryInput):
     worker_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
     claimed_at: UtcDateTime
@@ -367,6 +381,19 @@ class TaskRepository:
             )
 
     async def transition_task(self, value: TransitionCreate) -> TaskEvent:
+        return await self._record_task_event(value, require_state_change=True)
+
+    async def record_progress(self, value: ProgressCreate) -> TaskEvent:
+        """Atomically update progress and append an event without changing task state."""
+
+        return await self._record_task_event(value, require_state_change=False)
+
+    async def _record_task_event(
+        self,
+        value: TransitionCreate,
+        *,
+        require_state_change: bool,
+    ) -> TaskEvent:
         async with self._sessions.begin() as session:
             task = (
                 (
@@ -387,7 +414,10 @@ class TaskRepository:
                 raise RepositoryConflict("transition attempt is not current")
 
             current_status = TaskStatus(str(task["status"]))
-            require_task_transition(current_status, value.target_status)
+            if require_state_change:
+                require_task_transition(current_status, value.target_status)
+            elif current_status is not value.target_status:
+                raise RepositoryConflict("task status changed before progress was recorded")
             if value.progress < int(task["progress"]):
                 raise RepositoryConflict("task progress cannot decrease")
 

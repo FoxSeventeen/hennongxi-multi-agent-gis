@@ -30,6 +30,7 @@ from hennongxi_master.llm import LlmConfig, LlmPlanningAdapter, LlmPlanningError
 from hennongxi_master.planning import build_builtin_recovery_plan
 from hennongxi_master.repository import (
     ArtifactCreate,
+    ProgressCreate,
     RepositoryConflict,
     TaskRepository,
     TransitionCreate,
@@ -385,6 +386,117 @@ async def test_illegal_transition_rolls_back_task_and_event_together(
     assert task.status is TaskStatus.PENDING
     assert task.progress == 0
     assert events == ()
+
+
+@pytest.mark.asyncio
+async def test_same_state_progress_atomically_updates_running_step_and_event(
+    repository: TaskRepository,
+) -> None:
+    await create_pending_task(repository)
+    await repository.transition_task(
+        TransitionCreate(
+            task_id=TASK_ID,
+            attempt=1,
+            step_id="planning",
+            agent=AgentName.MASTER,
+            target_status=TaskStatus.PLANNING,
+            progress=5,
+            message="正在生成计划",
+            elapsed_ms=10,
+            occurred_at=NOW,
+        )
+    )
+    await repository.save_plan(plan(), attempt=1)
+    started_at = NOW + timedelta(seconds=1)
+    await repository.transition_task(
+        TransitionCreate(
+            task_id=TASK_ID,
+            attempt=1,
+            step_id="prepare_data",
+            agent=AgentName.DATA,
+            target_status=TaskStatus.DATA_PREPARING,
+            progress=10,
+            message="开始准备数据",
+            elapsed_ms=0,
+            occurred_at=started_at,
+            step_status=StepStatus.RUNNING,
+            step_progress=0,
+            step_started_at=started_at,
+        )
+    )
+
+    event = await repository.record_progress(
+        ProgressCreate(
+            task_id=TASK_ID,
+            attempt=1,
+            step_id="prepare_data",
+            agent=AgentName.DATA,
+            target_status=TaskStatus.DATA_PREPARING,
+            progress=25,
+            message="数据校验进行中",
+            elapsed_ms=500,
+            occurred_at=NOW + timedelta(seconds=2),
+            step_status=StepStatus.RUNNING,
+            step_progress=60,
+        )
+    )
+
+    task = await repository.get_task(TASK_ID)
+    assert task is not None
+    assert task.status is TaskStatus.DATA_PREPARING
+    assert task.progress == 25
+    assert task.steps[0].status is StepStatus.RUNNING
+    assert task.steps[0].progress == 60
+    assert task.steps[0].started_at == started_at
+    assert event.sequence == 3
+    assert event.status is TaskStatus.DATA_PREPARING
+    assert event.correlation_id == CORRELATION_ID
+
+
+@pytest.mark.asyncio
+async def test_same_state_progress_rejects_stale_state_without_partial_writes(
+    repository: TaskRepository,
+) -> None:
+    await create_pending_task(repository)
+    await repository.transition_task(
+        TransitionCreate(
+            task_id=TASK_ID,
+            attempt=1,
+            step_id="planning",
+            agent=AgentName.MASTER,
+            target_status=TaskStatus.PLANNING,
+            progress=5,
+            message="正在生成计划",
+            elapsed_ms=10,
+            occurred_at=NOW,
+        )
+    )
+    await repository.save_plan(plan(), attempt=1)
+
+    with pytest.raises(RepositoryConflict, match="task status changed"):
+        await repository.record_progress(
+            ProgressCreate(
+                task_id=TASK_ID,
+                attempt=1,
+                step_id="prepare_data",
+                agent=AgentName.DATA,
+                target_status=TaskStatus.DATA_PREPARING,
+                progress=10,
+                message="过期工作者不得写入",
+                elapsed_ms=1,
+                occurred_at=NOW + timedelta(seconds=1),
+                step_status=StepStatus.RUNNING,
+                step_progress=1,
+                step_started_at=NOW + timedelta(seconds=1),
+            )
+        )
+
+    task = await repository.get_task(TASK_ID)
+    assert task is not None
+    assert task.status is TaskStatus.PLANNING
+    assert task.progress == 5
+    assert task.steps[0].status is StepStatus.PENDING
+    assert [event.sequence for event in await repository.list_events(TASK_ID)] == [1]
 
 
 async def assert_constraint_rejects(
