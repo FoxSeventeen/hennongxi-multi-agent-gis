@@ -777,26 +777,37 @@ The critical path is contracts → persistence/events → raster chain → orche
 
 **验收标准：**
 
-- [ ] `AMAP_WEB_SERVICE_KEY` 仅注入 Master；未配置时返回明确的可选能力状态，不把 Key、
+- [x] `AMAP_WEB_SERVICE_KEY` 仅注入 Master；未配置时返回明确的可选能力状态，不把 Key、
   完整查询串或原始响应写入日志、数据库和错误响应。
-- [ ] 客户端固定 HTTPS 目标、限制连接/读取超时和最大响应体，拒绝重定向、非 JSON、缺失
+- [x] 客户端固定 HTTPS 目标、限制连接/读取超时和最大响应体，拒绝重定向、非 JSON、缺失
   必需字段与自相矛盾的响应；允许忽略有界的新增字段，并把 `10000`、密钥错误、无权限、
   日限额、频率限制和服务繁忙映射为提供商无关结果。
-- [ ] 生产代码不缓存高德数据；测试只使用本地假服务和自有夹具，显式真实冒烟只输出脱敏
+- [x] 生产代码不缓存高德数据；测试只使用本地假服务和自有夹具，显式真实冒烟只输出脱敏
   状态与匹配数量。
 
 **验证：**
 
-- [ ] `docker compose run --rm master pytest services/master/tests/test_amap.py -q`
-- [ ] 假服务覆盖成功、零结果、多结果、认证、限流、超时、重定向、超大响应、畸形 JSON 和
+- [x] 高德适配器与冒烟测试通过 70 项，Master 全量测试通过 179 项；两者均在最新构建的
+  `master-agent` 镜像中执行。
+- [x] 假服务覆盖成功、零结果、多结果、认证、限流、超时、重定向、压缩/超大响应、畸形 JSON 和
   密钥脱敏；显式真实冒烟返回 `infocode=10000`，且 Git/日志中没有密钥。
+- [x] Compose 拓扑测试通过 9 项，默认配置与本地高德配置均通过
+  `docker compose config --quiet`；Ruff、38 个 Master 文件格式检查和 33 个源码文件 Mypy
+  通过。
+- [x] 安全审查修正压缩响应可能在计数前放大的问题：请求强制 `Accept-Encoding: identity`，
+  压缩响应及声明超限响应在读取正文前拒绝；五轴复核未发现剩余阻断项。
+- [x] 安全修正后的最新镜像真实调用得到 `VERIFIED`、唯一匹配、`infocode=10000`，耗时
+  380 ms；输出仅含固定源指纹、脱敏状态、时间、耗时、可重试标志和匹配数。
 
 **依赖：**T01、T03、T14；门禁 G5。
 
-**预计修改文件：**Master 高德适配器及测试、`.env.example`、`docker-compose.yml`、
-`docs/development.md`。
+**实际修改文件：**Master 高德适配器与脱敏冒烟命令及测试、`.env.example`、
+`docker-compose.yml`、`docs/development.md` 和 Compose 拓扑测试；未修改任务状态机、公开路由、
+数据库、Redis、遥感数据、成果或前端。
 
-**工作量：**中等；配置与客户端总计控制在 5 个文件范围内。
+**实施提交：**`bab1bcf`、`c20ccf8`、`376949a`、`3e9fe3f`、`5ba13e3`、`cb24bd3`。
+
+**工作量：**中等；核心生产代码与运行配置控制在 5 个文件范围内，其余为测试和文档。
 
 #### 任务 24：把研究区地名校验接入 Master 规划流程
 
