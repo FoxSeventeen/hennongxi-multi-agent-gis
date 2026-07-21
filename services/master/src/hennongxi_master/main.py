@@ -16,6 +16,8 @@ from hennongxi_master.events import EventStore
 from hennongxi_master.health import install_master_health_routes
 from hennongxi_master.repository import TaskRepository
 from hennongxi_master.runtime import MasterWorkerRuntime, create_worker_runtime
+from hennongxi_master.sse import EventStreamConfig
+from hennongxi_master.sse_api import install_master_event_routes
 from hennongxi_master.tasks import install_master_task_routes
 from hennongxi_master.worker import WorkerConfig
 
@@ -82,6 +84,7 @@ def create_master_app(environment: Mapping[str, str] | None = None) -> FastAPI:
         socket_connect_timeout=2.0,
     )
     master.state.event_store_factory = lambda repository, redis: EventStore(repository, redis)
+    master.state.event_stream_config = EventStreamConfig.from_environment(values)
     master.state.worker_config = WorkerConfig.from_environment(values)
     master.state.worker_runtime_factory = lambda repository, config, event_store: (
         create_worker_runtime(
@@ -93,6 +96,7 @@ def create_master_app(environment: Mapping[str, str] | None = None) -> FastAPI:
     )
     install_master_health_routes(master)
     install_master_task_routes(master)
+    install_master_event_routes(master)
     return master
 
 

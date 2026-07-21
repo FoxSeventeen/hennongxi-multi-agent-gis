@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from time import monotonic
 from typing import Protocol
@@ -48,6 +48,18 @@ class EventStreamConfig:
     redis_block_ms: int = 1000
     heartbeat_seconds: float = 15.0
     fallback_poll_seconds: float = 1.0
+
+    @classmethod
+    def from_environment(cls, environment: Mapping[str, str]) -> EventStreamConfig:
+        try:
+            return cls(
+                replay_batch_size=int(environment.get("SSE_REPLAY_BATCH_SIZE", "100")),
+                redis_block_ms=int(environment.get("SSE_REDIS_BLOCK_MS", "1000")),
+                heartbeat_seconds=float(environment.get("SSE_HEARTBEAT_SECONDS", "15")),
+                fallback_poll_seconds=float(environment.get("SSE_FALLBACK_POLL_SECONDS", "1")),
+            )
+        except ValueError as error:
+            raise ValueError("SSE configuration is invalid or outside safe bounds") from error
 
     def __post_init__(self) -> None:
         if not 1 <= self.replay_batch_size <= 1000:

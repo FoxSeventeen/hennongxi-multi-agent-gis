@@ -60,6 +60,16 @@ def test_create_retry_and_sse_status_and_content_types_are_frozen() -> None:
     event_content = paths["/api/v1/tasks/{task_id}/events"]["get"]["responses"]["200"]["content"]
     assert set(event_content) == {"text/event-stream"}
 
+    event_operation = paths["/api/v1/tasks/{task_id}/events"]["get"]
+    event_headers = {
+        parameter["name"]: parameter
+        for parameter in event_operation["parameters"]
+        if parameter["in"] == "header"
+    }
+    assert set(event_headers) == {"Last-Event-ID"}
+    assert event_headers["Last-Event-ID"]["required"] is False
+    assert {"404", "422", "503"} <= set(event_operation["responses"])
+
 
 def test_publisher_resource_routes_are_read_only() -> None:
     document = load_checked_in_openapi()

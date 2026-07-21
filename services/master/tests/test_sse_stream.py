@@ -103,7 +103,7 @@ def test_sse_frames_follow_utf8_event_stream_format() -> None:
     assert heartbeat_frame() == b": heartbeat\n\n"
 
 
-@pytest.mark.parametrize("value", ["-1", "+1", "1.0", " 1", "1\n2", "x", "9" * 20])
+@pytest.mark.parametrize("value", ["-1", "+1", "01", "1.0", " 1", "1\n2", "x", "9" * 20])
 def test_last_event_id_rejects_noncanonical_or_oversized_values(value: str) -> None:
     with pytest.raises(ValueError, match="Last-Event-ID"):
         parse_last_event_id(value)
@@ -198,3 +198,21 @@ async def test_disconnected_client_stops_before_requesting_more_history() -> Non
 def test_stream_config_rejects_unbounded_or_busy_loop_values(name: str, value: int | float) -> None:
     with pytest.raises(ValueError, match=name):
         EventStreamConfig(**{name: value})
+
+
+def test_stream_config_parses_bounded_environment_values() -> None:
+    assert EventStreamConfig.from_environment(
+        {
+            "SSE_REPLAY_BATCH_SIZE": "25",
+            "SSE_REDIS_BLOCK_MS": "250",
+            "SSE_HEARTBEAT_SECONDS": "10",
+            "SSE_FALLBACK_POLL_SECONDS": "0.5",
+        }
+    ) == EventStreamConfig(
+        replay_batch_size=25,
+        redis_block_ms=250,
+        heartbeat_seconds=10,
+        fallback_poll_seconds=0.5,
+    )
+    with pytest.raises(ValueError, match="SSE configuration"):
+        EventStreamConfig.from_environment({"SSE_REDIS_BLOCK_MS": "unbounded"})

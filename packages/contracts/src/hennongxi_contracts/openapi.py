@@ -116,7 +116,7 @@ def create_contract_app() -> FastAPI:
         tags=["Master public"],
         response_model=TaskEvent,
         response_class=EventStreamResponse,
-        responses=_resource_errors(404, 422),
+        responses=_resource_errors(404, 422, 503),
         openapi_extra={
             "description": (
                 "SSE stream. Each event id is the durable monotonic sequence and each data "
@@ -124,7 +124,11 @@ def create_contract_app() -> FastAPI:
             )
         },
     )
-    def stream_task_events(task_id: Annotated[UUID, Path()]) -> TaskEvent:
+    def stream_task_events(
+        task_id: Annotated[UUID, Path()],
+        last_event_id: Annotated[str | None, Header(alias="Last-Event-ID")] = None,
+    ) -> TaskEvent:
+        del last_event_id
         _not_implemented()
 
     @app.post(

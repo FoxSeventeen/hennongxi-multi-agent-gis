@@ -92,6 +92,14 @@ paths:
           type: string
           format: uuid
           title: Task Id
+      - name: Last-Event-ID
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Last-Event-Id
       responses:
         '200':
           description: Successful Response
@@ -106,6 +114,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '422':
+          description: Structured error without secret or provider payload fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
           description: Structured error without secret or provider payload fields.
           content:
             application/json:
