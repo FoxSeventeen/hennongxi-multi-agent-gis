@@ -201,6 +201,10 @@ class AmapStudyAreaVerifier:
             async with self.client.stream(
                 "GET",
                 f"{AMAP_ORIGIN}{AMAP_PLACE_PATH}",
+                headers={
+                    "Accept": "application/json",
+                    "Accept-Encoding": "identity",
+                },
                 params={
                     "key": self.config.api_key.get_secret_value(),
                     "keywords": CANONICAL_STUDY_AREA_NAME,
@@ -218,6 +222,12 @@ class AmapStudyAreaVerifier:
                 if response.status_code != 200:
                     return self._result(
                         code=_map_http_status(response.status_code),
+                        checked_at=checked_at,
+                        timer_started=timer_started,
+                    )
+                if _response_body_is_declared_unsafe(response):
+                    return self._result(
+                        code=AmapVerificationCode.RESPONSE_INVALID,
                         checked_at=checked_at,
                         timer_started=timer_started,
                     )
@@ -325,6 +335,21 @@ def _map_provider_failure(envelope: _AmapEnvelope) -> AmapVerificationCode:
     if envelope.infocode in _REJECTED_INFOCODES:
         return AmapVerificationCode.REQUEST_REJECTED
     return AmapVerificationCode.RESPONSE_INVALID
+
+
+def _response_body_is_declared_unsafe(response: httpx.Response) -> bool:
+    content_encoding = response.headers.get("content-encoding", "identity").strip().lower()
+    if content_encoding not in {"", "identity"}:
+        return True
+
+    declared_length = response.headers.get("content-length")
+    if declared_length is None:
+        return False
+    try:
+        content_length = int(declared_length)
+    except ValueError:
+        return True
+    return content_length < 0 or content_length > MAX_AMAP_RESPONSE_BYTES
 
 
 async def _read_bounded_response(response: httpx.Response) -> bytes:

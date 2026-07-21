@@ -200,6 +200,8 @@ async def test_amap_verifier_uses_only_fixed_canonical_search_and_returns_minima
     request = captured["request"]
     assert isinstance(request, httpx.Request)
     assert request.method == "GET"
+    assert request.headers["accept"] == "application/json"
+    assert request.headers["accept-encoding"] == "identity"
     assert request.url.scheme == "https"
     assert request.url.host == "restapi.amap.com"
     assert request.url.path == AMAP_PLACE_PATH
@@ -419,3 +421,24 @@ async def test_amap_verifier_never_reads_non_200_response_body() -> None:
         result = await AmapStudyAreaVerifier(amap_config(), client).verify()
 
     assert result.code is AmapVerificationCode.REQUEST_REJECTED
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {"content-encoding": "gzip"},
+        {"content-length": str(MAX_AMAP_RESPONSE_BYTES + 1)},
+    ],
+)
+@pytest.mark.asyncio
+async def test_amap_verifier_rejects_encoded_or_declared_oversized_body_without_reading(
+    headers: dict[str, str],
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, headers=headers, stream=FailIfReadStream())
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await AmapStudyAreaVerifier(amap_config(), client).verify()
+
+    assert result.code is AmapVerificationCode.RESPONSE_INVALID
+    assert result.retryable is True
