@@ -16,7 +16,10 @@ from hennongxi_contracts import (
     ArtifactStatus,
     ArtifactType,
     CreateTaskRequest,
+    DataAssetRef,
+    DataPrepareResult,
     ExecutionPlan,
+    LogicalDatasetId,
     ModelCallRecord,
     ModelCallStatus,
     PlanSource,
@@ -212,6 +215,20 @@ async def test_repository_persists_and_reconstructs_complete_current_graph(
             storage_key=f"{TASK_ID}/attempt-1/data_manifest.json",
         )
     )
+    data_output = DataPrepareResult(
+        task_id=TASK_ID,
+        step_id="prepare_data",
+        attempt=1,
+        correlation_id=CORRELATION_ID,
+        assets=tuple(
+            DataAssetRef(
+                dataset_id=dataset_id,
+                checksum_sha256=SHA256,
+                byte_size=10,
+            )
+            for dataset_id in LogicalDatasetId
+        ),
+    )
     completed_event = await repository.transition_task(
         TransitionCreate(
             task_id=TASK_ID,
@@ -227,6 +244,7 @@ async def test_repository_persists_and_reconstructs_complete_current_graph(
             step_progress=100,
             step_completed_at=NOW,
             artifact_ids=(ARTIFACT_ID,),
+            step_output=data_output,
         )
     )
     assert completed_event.sequence == 3
@@ -254,6 +272,13 @@ async def test_repository_persists_and_reconstructs_complete_current_graph(
     assert geometry["type"] == "MultiPolygon"
 
     async with engine.connect() as connection:
+        stored_output = await connection.scalar(
+            text(
+                "SELECT output FROM steps WHERE task_id = :task_id "
+                "AND attempt = 1 AND step_id = 'prepare_data'"
+            ),
+            {"task_id": TASK_ID},
+        )
         columns = set(
             await connection.scalars(
                 text(
@@ -262,6 +287,7 @@ async def test_repository_persists_and_reconstructs_complete_current_graph(
                 )
             )
         )
+    assert DataPrepareResult.model_validate(stored_output) == data_output
     assert {"api_key", "prompt", "response_body"}.isdisjoint(columns)
 
 

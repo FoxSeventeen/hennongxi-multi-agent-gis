@@ -25,6 +25,7 @@ from hennongxi_contracts import (
     QualityEvaluateResult,
     QualityMetrics,
     QualityThresholds,
+    StepStatus,
     StructuredError,
     TaskEvent,
     TaskResponse,
@@ -389,6 +390,15 @@ async def test_orchestrator_completes_fixed_chain_with_one_durable_identity() ->
         and command.correlation_id == CORRELATION_ID
         for command in agents.commands
     )
+    completed_steps = {
+        record.step_id: record.step_output
+        for record in repository.records
+        if record.step_status is StepStatus.COMPLETED
+    }
+    assert isinstance(completed_steps["prepare_data"], DataPrepareResult)
+    assert isinstance(completed_steps["analyze_ndvi_change"], AnalysisRunResult)
+    assert isinstance(completed_steps["evaluate_quality"], QualityEvaluateResult)
+    assert isinstance(completed_steps["publish_results"], PublisherPublishResult)
     assert [event.sequence for event in publisher.events] == list(
         range(1, len(repository.records) + 1)
     )

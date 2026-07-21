@@ -240,6 +240,7 @@ class TaskOrchestrator:
             step_status=StepStatus.COMPLETED,
             step_progress=100,
             step_completed_at=self._now(),
+            step_output=data,
         )
         await self._progress(
             task,
@@ -293,6 +294,7 @@ class TaskOrchestrator:
             step_progress=100,
             step_completed_at=self._now(),
             artifact_ids=tuple(artifact.artifact_id for artifact in analysis.artifacts),
+            step_output=analysis,
         )
         await self._progress(
             task,
@@ -348,6 +350,7 @@ class TaskOrchestrator:
                 step_progress=100,
                 step_completed_at=self._now(),
                 artifact_ids=(quality.artifact.artifact_id,),
+                step_output=quality,
             )
             return await self._fail_without_step(
                 task,
@@ -376,6 +379,7 @@ class TaskOrchestrator:
             step_progress=100,
             step_completed_at=self._now(),
             artifact_ids=(quality.artifact.artifact_id,),
+            step_output=quality,
         )
         await self._progress(
             task,
@@ -450,6 +454,7 @@ class TaskOrchestrator:
             step_progress=100,
             step_completed_at=self._now(),
             artifact_ids=(published.report.artifact_id,),
+            step_output=published,
         )
         completed = await self._require_task(task.task_id)
         _LOGGER.info("orchestration_completed", **identity, artifact_count=len(completed.artifacts))
@@ -492,6 +497,11 @@ class TaskOrchestrator:
         step_started_at: datetime | None = None,
         step_completed_at: datetime | None = None,
         artifact_ids: tuple[UUID, ...] = (),
+        step_output: DataPrepareResult
+        | AnalysisRunResult
+        | QualityEvaluateResult
+        | PublisherPublishResult
+        | None = None,
     ) -> None:
         await self._persist_transition(
             TransitionCreate(
@@ -509,6 +519,7 @@ class TaskOrchestrator:
                 step_started_at=step_started_at,
                 step_completed_at=step_completed_at,
                 artifact_ids=artifact_ids,
+                step_output=step_output,
             )
         )
 
@@ -528,6 +539,11 @@ class TaskOrchestrator:
         step_started_at: datetime | None = None,
         step_completed_at: datetime | None = None,
         artifact_ids: tuple[UUID, ...] = (),
+        step_output: DataPrepareResult
+        | AnalysisRunResult
+        | QualityEvaluateResult
+        | PublisherPublishResult
+        | None = None,
     ) -> None:
         event = await self._repository.record_progress(
             ProgressCreate(
@@ -545,6 +561,7 @@ class TaskOrchestrator:
                 step_started_at=step_started_at,
                 step_completed_at=step_completed_at,
                 artifact_ids=artifact_ids,
+                step_output=step_output,
             )
         )
         await self._publish_event(event)

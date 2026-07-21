@@ -8,15 +8,19 @@ from uuid import UUID, uuid4
 
 from hennongxi_contracts import (
     AgentName,
+    AnalysisRunResult,
     ArtifactRef,
     ArtifactStatus,
     ArtifactType,
     CreateTaskRequest,
+    DataPrepareResult,
     ExecutionPlan,
     ModelCallRecord,
     ModelCallStatus,
     PlanSource,
     PlanStepKind,
+    PublisherPublishResult,
+    QualityEvaluateResult,
     StepStatus,
     StructuredError,
     TaskEvent,
@@ -41,6 +45,11 @@ class RepositoryInput(BaseModel):
     """Strict base class for values crossing into the persistence boundary."""
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+
+type StepOutput = (
+    DataPrepareResult | AnalysisRunResult | QualityEvaluateResult | PublisherPublishResult
+)
 
 
 class WatershedCreate(RepositoryInput):
@@ -99,6 +108,7 @@ class TransitionCreate(RepositoryInput):
     step_started_at: UtcDateTime | None = None
     step_completed_at: UtcDateTime | None = None
     artifact_ids: tuple[UUID, ...] = ()
+    step_output: StepOutput | None = None
 
     @model_validator(mode="after")
     def require_consistent_evidence(self) -> Self:
@@ -118,6 +128,8 @@ class TransitionCreate(RepositoryInput):
                 )
             ):
                 raise ValueError("step evidence requires step_status")
+            if self.step_output is not None:
+                raise ValueError("step output requires completed step evidence")
             return self
         if self.step_progress is None:
             raise ValueError("step_status requires step_progress")
@@ -129,6 +141,13 @@ class TransitionCreate(RepositoryInput):
             self.step_completed_at is None or self.error is None
         ):
             raise ValueError("failed step requires completion time and structured error")
+        if self.step_output is not None and (
+            self.step_status is not StepStatus.COMPLETED
+            or self.step_output.task_id != self.task_id
+            or self.step_output.attempt != self.attempt
+            or self.step_output.step_id != self.step_id
+        ):
+            raise ValueError("step output must match completed task, attempt, and step evidence")
         return self
 
 
@@ -474,7 +493,8 @@ class TaskRepository:
                         "UPDATE steps SET status = :status, progress = :progress, "
                         "started_at = COALESCE(:started_at, started_at), "
                         "completed_at = COALESCE(:completed_at, completed_at), "
-                        "elapsed_ms = :elapsed_ms, error = CAST(:error AS jsonb) "
+                        "elapsed_ms = :elapsed_ms, error = CAST(:error AS jsonb), "
+                        "output = COALESCE(CAST(:step_output AS jsonb), output) "
                         "WHERE task_id = :task_id AND attempt = :attempt AND step_id = :step_id "
                         "RETURNING step_id"
                     ),
@@ -485,6 +505,11 @@ class TaskRepository:
                         "completed_at": value.step_completed_at,
                         "elapsed_ms": value.elapsed_ms,
                         "error": error_json,
+                        "step_output": (
+                            _json(value.step_output.model_dump(mode="json"))
+                            if value.step_output is not None
+                            else None
+                        ),
                         "task_id": value.task_id,
                         "attempt": value.attempt,
                         "step_id": value.step_id,

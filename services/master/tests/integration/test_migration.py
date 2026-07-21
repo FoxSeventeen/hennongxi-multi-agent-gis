@@ -23,6 +23,7 @@ EXPECTED_CONSTRAINTS = {
     "ck_artifacts_complete_metadata",
     "ck_events_progress",
     "ck_steps_progress",
+    "ck_steps_output",
     "ck_tasks_progress",
     "ck_tasks_status",
     "fk_artifacts_step",
