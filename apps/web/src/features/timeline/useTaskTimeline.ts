@@ -34,7 +34,7 @@ interface TimelineOptions {
 
 export function useTaskTimeline(
   client: MasterClient,
-  taskId: string,
+  taskId: string | null,
   options: TimelineOptions = {},
 ): TaskTimelineState {
   const [snapshot, setSnapshot] = useState<TaskSnapshot | null>(null);
@@ -46,17 +46,21 @@ export function useTaskTimeline(
   const retryKey = retryDelaysMs.join(",");
 
   useEffect(() => {
+    setSnapshot(null);
+    setEvents([]);
+    setConnection("loading");
+    setProblem(null);
+    if (taskId === null) {
+      return;
+    }
+    const activeTaskId = taskId;
+
     const controller = new AbortController();
     const eventsBySequence = new Map<number, TaskEvent>();
     let lastSequence = 0;
     let fatalFailure = false;
     let latestSnapshot: TaskSnapshot | null = null;
     let planRefreshPending = false;
-
-    setSnapshot(null);
-    setEvents([]);
-    setConnection("loading");
-    setProblem(null);
 
     function acceptEvent(event: TaskEvent): void {
       if (isStopped(controller.signal) || eventsBySequence.has(event.sequence)) {
@@ -90,7 +94,7 @@ export function useTaskTimeline(
 
     async function refreshSnapshot(): Promise<TaskSnapshot | null> {
       try {
-        const nextSnapshot = await client.getTask(taskId);
+        const nextSnapshot = await client.getTask(activeTaskId);
         latestSnapshot = nextSnapshot;
         if (!isStopped(controller.signal)) {
           setSnapshot(nextSnapshot);
@@ -123,7 +127,7 @@ export function useTaskTimeline(
       for (;;) {
         setConnection(recoveryAttempt === 0 ? "streaming" : "reconnecting");
         try {
-          await client.streamTaskEvents(taskId, {
+          await client.streamTaskEvents(activeTaskId, {
             afterSequence: lastSequence,
             signal: controller.signal,
             onEvent(event) {

@@ -4,7 +4,8 @@ import type { AcceptedTask, MasterClient, ReadinessSnapshot } from "../api/clien
 import { MapWorkspace } from "../components/MapWorkspace";
 import { ReadinessPanel } from "../components/ReadinessPanel";
 import { TaskComposer } from "../components/TaskComposer";
-import { TaskTimeline } from "../features/timeline/TaskTimeline";
+import { TaskTimelineView } from "../features/timeline/TaskTimeline";
+import { useTaskTimeline } from "../features/timeline/useTaskTimeline";
 import "./app.css";
 import {
   clearTaskLocation,
@@ -15,6 +16,7 @@ import {
 
 interface AppProps {
   readonly client: MasterClient;
+  readonly publisherBaseUrl?: string;
 }
 
 type ReadinessState =
@@ -22,12 +24,13 @@ type ReadinessState =
   | { readonly phase: "ready"; readonly snapshot: ReadinessSnapshot }
   | { readonly phase: "error" };
 
-export function App({ client }: AppProps) {
+export function App({ client, publisherBaseUrl = "http://localhost:8004" }: AppProps) {
   const [refreshIndex, setRefreshIndex] = useState(0);
   const [readinessState, setReadinessState] = useState<ReadinessState>({ phase: "loading" });
   const [taskLocation, setTaskLocation] = useState<TaskLocationState>(() =>
     readTaskLocation(window.location.search),
   );
+  const timelineState = useTaskTimeline(client, taskLocation.taskId);
 
   useEffect(() => {
     let active = true;
@@ -79,7 +82,11 @@ export function App({ client }: AppProps) {
       </header>
 
       <main className="workspace-layout">
-        <MapWorkspace activeTaskId={taskLocation.taskId} />
+        <MapWorkspace
+          activeTaskId={taskLocation.taskId}
+          publication={timelineState.snapshot?.publication ?? null}
+          publisherBaseUrl={publisherBaseUrl}
+        />
         <aside className="control-rail" aria-label="任务与状态控制区">
           {taskLocation.invalid ? (
             <TaskLocationError
@@ -89,7 +96,7 @@ export function App({ client }: AppProps) {
               }}
             />
           ) : taskLocation.taskId === null ? null : (
-            <TaskTimeline client={client} taskId={taskLocation.taskId} />
+            <TaskTimelineView state={timelineState} />
           )}
           <TaskComposer
             client={client}

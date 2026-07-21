@@ -10,12 +10,20 @@ if (rootElement === null) {
 }
 
 const configuredBaseUrl = import.meta.env.VITE_MASTER_BASE_URL?.trim();
+const configuredPublisherBaseUrl = import.meta.env.VITE_PUBLISHER_BASE_URL?.trim();
 const client = createMasterClient({
   baseUrl: configuredBaseUrl && configuredBaseUrl.length > 0 ? configuredBaseUrl : "http://localhost:8000",
 });
 
 createRoot(rootElement).render(
   <StrictMode>
-    <App client={client} />
+    <App
+      client={client}
+      publisherBaseUrl={
+        configuredPublisherBaseUrl && configuredPublisherBaseUrl.length > 0
+          ? configuredPublisherBaseUrl
+          : "http://localhost:8004"
+      }
+    />
   </StrictMode>,
 );
