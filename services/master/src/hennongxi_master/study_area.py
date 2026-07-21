@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Final, Self
+from time import monotonic
+from typing import Final, Protocol, Self
 
 from hennongxi_contracts.common import UtcDateTime
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from hennongxi_master.amap import AmapVerification, AmapVerificationCode
 
 
 class StudyAreaIntent(StrEnum):
@@ -53,6 +59,17 @@ _RETRYABLE_REASONS: Final = frozenset(
         StudyAreaReasonCode.ONLINE_RESPONSE_INVALID,
     }
 )
+_ONLINE_REASON_BY_CODE: Final = {
+    AmapVerificationCode.VERIFIED: StudyAreaReasonCode.ONLINE_MATCH_CONFIRMED,
+    AmapVerificationCode.NO_MATCH: StudyAreaReasonCode.ONLINE_NO_MATCH,
+    AmapVerificationCode.AMBIGUOUS: StudyAreaReasonCode.ONLINE_MATCH_AMBIGUOUS,
+    AmapVerificationCode.AUTHENTICATION_FAILED: (StudyAreaReasonCode.ONLINE_AUTHENTICATION_FAILED),
+    AmapVerificationCode.QUOTA_EXCEEDED: StudyAreaReasonCode.ONLINE_QUOTA_EXCEEDED,
+    AmapVerificationCode.RATE_LIMITED: StudyAreaReasonCode.ONLINE_RATE_LIMITED,
+    AmapVerificationCode.PROVIDER_UNAVAILABLE: StudyAreaReasonCode.ONLINE_CHECK_UNAVAILABLE,
+    AmapVerificationCode.REQUEST_REJECTED: StudyAreaReasonCode.ONLINE_REQUEST_REJECTED,
+    AmapVerificationCode.RESPONSE_INVALID: StudyAreaReasonCode.ONLINE_RESPONSE_INVALID,
+}
 
 
 class StudyAreaEvidence(BaseModel):
@@ -80,6 +97,80 @@ class StudyAreaEvidence(BaseModel):
         if self.retryable != (self.reason_code in _RETRYABLE_REASONS):
             raise ValueError("retryability must match the sanitized study-area reason")
         return self
+
+
+class SafeOnlineStudyAreaVerifier(Protocol):
+    async def verify(self) -> AmapVerification: ...
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class StudyAreaGrounder:
+    """Combine local intent with an optional fixed-input online cross-check."""
+
+    online_verifier: SafeOnlineStudyAreaVerifier | None
+    now: Callable[[], datetime] = lambda: datetime.now(UTC)
+    timer: Callable[[], float] = monotonic
+
+    async def verify_query(self, query: str) -> StudyAreaEvidence:
+        intent = resolve_study_area(query)
+        checked_at = self.now()
+        if intent is StudyAreaIntent.AMBIGUOUS:
+            return _local_evidence(
+                StudyAreaConclusion.DEGRADED,
+                StudyAreaReasonCode.LOCAL_STUDY_AREA_AMBIGUOUS,
+                checked_at,
+            )
+        if intent is StudyAreaIntent.OUT_OF_SCOPE:
+            return _local_evidence(
+                StudyAreaConclusion.REJECTED,
+                StudyAreaReasonCode.OUT_OF_SCOPE_STUDY_AREA,
+                checked_at,
+            )
+        if self.online_verifier is None:
+            return _local_evidence(
+                StudyAreaConclusion.DEGRADED,
+                StudyAreaReasonCode.ONLINE_CHECK_NOT_CONFIGURED,
+                checked_at,
+            )
+
+        started = self.timer()
+        try:
+            online_result = await self.online_verifier.verify()
+        except Exception:
+            return StudyAreaEvidence(
+                conclusion=StudyAreaConclusion.DEGRADED,
+                checked_at=checked_at,
+                duration_ms=max(0, round((self.timer() - started) * 1000)),
+                reason_code=StudyAreaReasonCode.ONLINE_CHECK_UNAVAILABLE,
+                retryable=True,
+            )
+
+        reason_code = _ONLINE_REASON_BY_CODE[online_result.code]
+        return StudyAreaEvidence(
+            conclusion=(
+                StudyAreaConclusion.VERIFIED
+                if online_result.code is AmapVerificationCode.VERIFIED
+                else StudyAreaConclusion.DEGRADED
+            ),
+            checked_at=online_result.checked_at,
+            duration_ms=online_result.duration_ms,
+            reason_code=reason_code,
+            retryable=reason_code in _RETRYABLE_REASONS,
+        )
+
+
+def _local_evidence(
+    conclusion: StudyAreaConclusion,
+    reason_code: StudyAreaReasonCode,
+    checked_at: datetime,
+) -> StudyAreaEvidence:
+    return StudyAreaEvidence(
+        conclusion=conclusion,
+        checked_at=checked_at,
+        duration_ms=0,
+        reason_code=reason_code,
+        retryable=False,
+    )
 
 
 _APPROVED_ALIASES: Final = (

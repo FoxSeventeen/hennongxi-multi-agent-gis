@@ -5,10 +5,12 @@ from datetime import UTC, datetime
 import pytest
 from fastapi.testclient import TestClient
 from hennongxi_contracts import ErrorCode, ErrorResponse
+from hennongxi_master.amap import AmapVerification, AmapVerificationCode
 from hennongxi_master.main import create_master_app
 from hennongxi_master.study_area import (
     StudyAreaConclusion,
     StudyAreaEvidence,
+    StudyAreaGrounder,
     StudyAreaIntent,
     StudyAreaReasonCode,
     resolve_study_area,
@@ -16,6 +18,18 @@ from hennongxi_master.study_area import (
 from pydantic import ValidationError
 
 CHECKED_AT = datetime(2026, 7, 21, 12, 0, tzinfo=UTC)
+
+
+class _OnlineVerifier:
+    def __init__(self, result: AmapVerification | Exception) -> None:
+        self.result = result
+        self.calls = 0
+
+    async def verify(self) -> AmapVerification:
+        self.calls += 1
+        if isinstance(self.result, Exception):
+            raise self.result
+        return self.result
 
 
 @pytest.mark.parametrize(
@@ -141,6 +155,169 @@ def test_study_area_evidence_rejects_inconsistent_conclusions(
             reason_code=reason_code,
             retryable=retryable,
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    (
+        "provider_code",
+        "match_count",
+        "provider_retryable",
+        "expected_conclusion",
+        "expected_reason",
+    ),
+    [
+        (
+            AmapVerificationCode.VERIFIED,
+            1,
+            False,
+            StudyAreaConclusion.VERIFIED,
+            StudyAreaReasonCode.ONLINE_MATCH_CONFIRMED,
+        ),
+        (
+            AmapVerificationCode.NO_MATCH,
+            0,
+            False,
+            StudyAreaConclusion.DEGRADED,
+            StudyAreaReasonCode.ONLINE_NO_MATCH,
+        ),
+        (
+            AmapVerificationCode.AMBIGUOUS,
+            2,
+            False,
+            StudyAreaConclusion.DEGRADED,
+            StudyAreaReasonCode.ONLINE_MATCH_AMBIGUOUS,
+        ),
+        (
+            AmapVerificationCode.AUTHENTICATION_FAILED,
+            0,
+            False,
+            StudyAreaConclusion.DEGRADED,
+            StudyAreaReasonCode.ONLINE_AUTHENTICATION_FAILED,
+        ),
+        (
+            AmapVerificationCode.QUOTA_EXCEEDED,
+            0,
+            True,
+            StudyAreaConclusion.DEGRADED,
+            StudyAreaReasonCode.ONLINE_QUOTA_EXCEEDED,
+        ),
+        (
+            AmapVerificationCode.RATE_LIMITED,
+            0,
+            True,
+            StudyAreaConclusion.DEGRADED,
+            StudyAreaReasonCode.ONLINE_RATE_LIMITED,
+        ),
+        (
+            AmapVerificationCode.PROVIDER_UNAVAILABLE,
+            0,
+            True,
+            StudyAreaConclusion.DEGRADED,
+            StudyAreaReasonCode.ONLINE_CHECK_UNAVAILABLE,
+        ),
+        (
+            AmapVerificationCode.REQUEST_REJECTED,
+            0,
+            False,
+            StudyAreaConclusion.DEGRADED,
+            StudyAreaReasonCode.ONLINE_REQUEST_REJECTED,
+        ),
+        (
+            AmapVerificationCode.RESPONSE_INVALID,
+            0,
+            True,
+            StudyAreaConclusion.DEGRADED,
+            StudyAreaReasonCode.ONLINE_RESPONSE_INVALID,
+        ),
+    ],
+)
+async def test_grounder_maps_online_results_to_provider_neutral_evidence(
+    provider_code: AmapVerificationCode,
+    match_count: int,
+    provider_retryable: bool,
+    expected_conclusion: StudyAreaConclusion,
+    expected_reason: StudyAreaReasonCode,
+) -> None:
+    verifier = _OnlineVerifier(
+        AmapVerification(
+            code=provider_code,
+            checked_at=CHECKED_AT,
+            duration_ms=12,
+            retryable=provider_retryable,
+            match_count=match_count,
+        )
+    )
+
+    evidence = await StudyAreaGrounder(verifier).verify_query("分析神农溪流域变化")
+
+    assert evidence.conclusion is expected_conclusion
+    assert evidence.reason_code is expected_reason
+    assert evidence.checked_at == CHECKED_AT
+    assert evidence.duration_ms == 12
+    assert evidence.retryable is provider_retryable
+    assert verifier.calls == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("query", "expected_conclusion", "expected_reason"),
+    [
+        (
+            "分析植被变化",
+            StudyAreaConclusion.DEGRADED,
+            StudyAreaReasonCode.LOCAL_STUDY_AREA_AMBIGUOUS,
+        ),
+        (
+            "分析武汉市东湖植被变化",
+            StudyAreaConclusion.REJECTED,
+            StudyAreaReasonCode.OUT_OF_SCOPE_STUDY_AREA,
+        ),
+    ],
+)
+async def test_grounder_never_calls_online_service_for_unapproved_local_intent(
+    query: str,
+    expected_conclusion: StudyAreaConclusion,
+    expected_reason: StudyAreaReasonCode,
+) -> None:
+    verifier = _OnlineVerifier(AssertionError("online verifier must not be called"))
+
+    evidence = await StudyAreaGrounder(verifier, now=lambda: CHECKED_AT).verify_query(query)
+
+    assert evidence.conclusion is expected_conclusion
+    assert evidence.reason_code is expected_reason
+    assert evidence.duration_ms == 0
+    assert verifier.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_grounder_degrades_safely_when_online_check_is_unconfigured() -> None:
+    evidence = await StudyAreaGrounder(None, now=lambda: CHECKED_AT).verify_query(
+        "分析神农溪流域变化"
+    )
+
+    assert evidence == StudyAreaEvidence(
+        conclusion=StudyAreaConclusion.DEGRADED,
+        checked_at=CHECKED_AT,
+        duration_ms=0,
+        reason_code=StudyAreaReasonCode.ONLINE_CHECK_NOT_CONFIGURED,
+        retryable=False,
+    )
+
+
+@pytest.mark.asyncio
+async def test_grounder_contains_unexpected_online_failures_without_provider_details() -> None:
+    private_detail = "private-provider-payload"
+    verifier = _OnlineVerifier(RuntimeError(private_detail))
+
+    evidence = await StudyAreaGrounder(verifier, now=lambda: CHECKED_AT).verify_query(
+        "分析神农溪流域变化"
+    )
+
+    serialized = evidence.model_dump_json()
+    assert evidence.reason_code is StudyAreaReasonCode.ONLINE_CHECK_UNAVAILABLE
+    assert evidence.retryable is True
+    assert private_detail not in serialized
 
 
 def test_task_api_rejects_clear_out_of_scope_location_before_repository_access() -> None:
