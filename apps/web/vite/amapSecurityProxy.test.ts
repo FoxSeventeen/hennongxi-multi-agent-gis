@@ -126,6 +126,87 @@ describe("高德 JS API 同源安全代理", () => {
     expect(init).toMatchObject({ method: "GET", redirect: "error" });
   });
 
+  it("把高德 application/json JSONP 规范化为可执行且 nosniff 的安全 JavaScript", async () => {
+    const callback = "jsonp_482913_1720000000000_";
+    const upstreamFetch = vi.fn<typeof fetch>(() =>
+      Promise.resolve(
+        new Response(
+          `${callback}( { "status": "1", "info": "ok", "locations": "110.1,31.2" } )`,
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        ),
+      ),
+    );
+
+    const response = await invokeProxy(
+      { securityCode: "server-only-test-code", upstreamFetch },
+      `/_AMapService/v3/assistant/coordinate/convert?locations=110.1%2C31.2&coordsys=gps&callback=${callback}`,
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe(
+      "application/javascript; charset=utf-8",
+    );
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(response.body).toBe(
+      `${callback}({"status":"1","info":"ok","locations":"110.1,31.2"});`,
+    );
+  });
+
+  it("拒绝可注入脚本的 JSONP callback 且不访问上游", async () => {
+    const upstreamFetch = vi.fn<typeof fetch>();
+
+    const response = await invokeProxy(
+      { securityCode: "server-only-test-code", upstreamFetch },
+      "/_AMapService/v3/assistant/coordinate/convert?locations=110.1%2C31.2&coordsys=gps&callback=alert%281%29",
+    );
+
+    expect(response.status).toBe(400);
+    expect(JSON.parse(response.body)).toMatchObject({
+      error: { code: "AMAP_PROXY_INVALID_QUERY" },
+    });
+    expect(upstreamFetch).not.toHaveBeenCalled();
+  });
+
+  it("拒绝重复 callback 参数且不访问上游", async () => {
+    const upstreamFetch = vi.fn<typeof fetch>();
+
+    const response = await invokeProxy(
+      { securityCode: "server-only-test-code", upstreamFetch },
+      "/_AMapService/v3/assistant/coordinate/convert?callback=jsonp_first_&callback=jsonp_second_",
+    );
+
+    expect(response.status).toBe(400);
+    expect(JSON.parse(response.body)).toMatchObject({
+      error: { code: "AMAP_PROXY_INVALID_QUERY" },
+    });
+    expect(upstreamFetch).not.toHaveBeenCalled();
+  });
+
+  it("拒绝与请求 callback 不一致的上游 JSONP 正文", async () => {
+    const upstreamFetch = vi.fn<typeof fetch>(() =>
+      Promise.resolve(
+        new Response('attackerCallback({"status":"1"})', {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      ),
+    );
+
+    const response = await invokeProxy(
+      { securityCode: "server-only-test-code", upstreamFetch },
+      "/_AMapService/v3/assistant/coordinate/convert?callback=jsonp_expected_",
+    );
+
+    expect(response.status).toBe(502);
+    expect(JSON.parse(response.body)).toMatchObject({
+      error: { code: "AMAP_PROXY_INVALID_RESPONSE" },
+    });
+    expect(response.body).not.toContain("attackerCallback");
+  });
+
   it.each([
     ["POST", "/_AMapService/v3/assistant/coordinate/convert", 405, "AMAP_PROXY_METHOD_NOT_ALLOWED"],
     ["GET", "/_AMapService/v3/place/text", 404, "AMAP_PROXY_PATH_NOT_ALLOWED"],

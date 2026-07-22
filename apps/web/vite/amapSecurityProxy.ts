@@ -5,6 +5,7 @@ const MAX_REQUEST_URL_LENGTH = 2_048;
 const DEFAULT_TIMEOUT_MS = 3_000;
 const DEFAULT_MAX_RESPONSE_BYTES = 256 * 1_024;
 const DEFAULT_MAX_CONCURRENT = 8;
+const JSONP_CALLBACK_PATTERN = /^[A-Za-z_$][0-9A-Za-z_$]{0,127}$/;
 
 const ALLOWED_UPSTREAMS = new Map([
   [
@@ -37,6 +38,8 @@ interface ProxyErrorBody {
 }
 
 class ResponseTooLargeError extends Error {}
+
+class InvalidUpstreamResponseError extends Error {}
 
 function sendError(
   response: ServerResponse,
@@ -110,6 +113,44 @@ async function readBoundedBody(
   return body;
 }
 
+function normalizeJsonpBody(
+  body: Uint8Array,
+  callback: string,
+  maxResponseBytes: number,
+): Uint8Array {
+  let source: string;
+  try {
+    source = new TextDecoder("utf-8", { fatal: true }).decode(body).trim();
+  } catch {
+    throw new InvalidUpstreamResponseError();
+  }
+
+  const prefix = `${callback}(`;
+  let jsonSource = source;
+  if (source.startsWith(prefix)) {
+    const suffixLength = source.endsWith(");") ? 2 : source.endsWith(")") ? 1 : 0;
+    if (suffixLength === 0) {
+      throw new InvalidUpstreamResponseError();
+    }
+    jsonSource = source.slice(prefix.length, -suffixLength).trim();
+  }
+
+  let payload: unknown;
+  try {
+    payload = JSON.parse(jsonSource);
+  } catch {
+    throw new InvalidUpstreamResponseError();
+  }
+
+  const normalized = new TextEncoder().encode(
+    `${callback}(${JSON.stringify(payload)});`,
+  );
+  if (normalized.byteLength > maxResponseBytes) {
+    throw new ResponseTooLargeError();
+  }
+  return normalized;
+}
+
 export function createAmapSecurityProxyMiddleware(
   options: AmapSecurityProxyOptions,
 ): (
@@ -170,6 +211,15 @@ export function createAmapSecurityProxyMiddleware(
       sendError(response, 400, "AMAP_PROXY_INVALID_QUERY", "安全密钥只能由服务端附加");
       return;
     }
+    const callbacks = requestUrl.searchParams.getAll("callback");
+    const callback = callbacks.length === 0 ? undefined : callbacks[0];
+    if (
+      callbacks.length > 1 ||
+      (callback !== undefined && !JSONP_CALLBACK_PATTERN.test(callback))
+    ) {
+      sendError(response, 400, "AMAP_PROXY_INVALID_QUERY", "JSONP 回调参数无效");
+      return;
+    }
     if (activeRequests >= maxConcurrent) {
       sendError(response, 429, "AMAP_PROXY_BUSY", "高德地图代理当前繁忙，请稍后重试");
       return;
@@ -212,11 +262,18 @@ export function createAmapSecurityProxyMiddleware(
       }
 
       const body = await readBoundedBody(upstreamResponse, maxResponseBytes);
+      const responseBody =
+        callback === undefined
+          ? body
+          : normalizeJsonpBody(body, callback, maxResponseBytes);
       response.statusCode = 200;
-      response.setHeader("Content-Type", contentType);
+      response.setHeader(
+        "Content-Type",
+        callback === undefined ? contentType : "application/javascript; charset=utf-8",
+      );
       response.setHeader("Cache-Control", "no-store");
       response.setHeader("X-Content-Type-Options", "nosniff");
-      response.end(body);
+      response.end(responseBody);
     } catch (error) {
       if (controller.signal.aborted) {
         sendError(response, 504, "AMAP_PROXY_TIMEOUT", "高德地图上游请求超时");
@@ -227,6 +284,8 @@ export function createAmapSecurityProxyMiddleware(
           "AMAP_PROXY_RESPONSE_TOO_LARGE",
           "高德地图上游响应超过安全上限",
         );
+      } else if (error instanceof InvalidUpstreamResponseError) {
+        sendError(response, 502, "AMAP_PROXY_INVALID_RESPONSE", "高德地图上游响应格式无效");
       } else {
         sendError(response, 502, "AMAP_PROXY_UPSTREAM_FAILED", "高德地图上游暂时不可用");
       }
