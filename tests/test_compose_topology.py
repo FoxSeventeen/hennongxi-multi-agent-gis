@@ -18,6 +18,16 @@ AGENT_SERVICES = {
 }
 RUNTIME_SERVICES = AGENT_SERVICES | {"web", "postgis", "redis"}
 PROFILE_SERVICES = {"e2e"}
+EXPECTED_RESOURCE_LIMITS = {
+    **{
+        service_name: {"cpus": 2.0, "mem_limit": "2g", "pids_limit": 256}
+        for service_name in AGENT_SERVICES
+    },
+    "web": {"cpus": 0.75, "mem_limit": "512m", "pids_limit": 128},
+    "postgis": {"cpus": 1.0, "mem_limit": "1g", "pids_limit": 256},
+    "redis": {"cpus": 0.5, "mem_limit": "512m", "pids_limit": 128},
+    "e2e": {"cpus": 2.0, "mem_limit": "3g", "pids_limit": 512},
+}
 
 
 def load_compose() -> dict[str, Any]:
@@ -178,6 +188,15 @@ def test_application_containers_are_non_privileged_and_read_only() -> None:
 
     serialized = COMPOSE_PATH.read_text(encoding="utf-8")
     assert "docker.sock" not in serialized
+
+
+def test_every_runtime_container_has_bounded_cpu_memory_and_pids() -> None:
+    services = load_compose()["services"]
+
+    assert set(EXPECTED_RESOURCE_LIMITS) == RUNTIME_SERVICES | PROFILE_SERVICES
+    for service_name, expected in EXPECTED_RESOURCE_LIMITS.items():
+        service = services[service_name]
+        assert {key: service[key] for key in expected} == expected
 
 
 def test_images_are_pinned_and_default_to_arm64() -> None:

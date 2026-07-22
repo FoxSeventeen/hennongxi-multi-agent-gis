@@ -1,6 +1,8 @@
 services:
   web:
     ports: !reset []
+    networks: !override
+      - private
 
   master-agent:
     command:
@@ -22,6 +24,8 @@ services:
       DATA_MANIFEST_PATH: /e2e/data/manifest.json
       ORCHESTRATION_POLL_SECONDS: 0.05
     ports: !reset []
+    networks: !override
+      - private
     volumes:
       - type: volume
         source: e2e-data
@@ -81,6 +85,8 @@ services:
       APP_ENV: test
       DATA_MANIFEST_PATH: /e2e/data/manifest.json
     ports: !reset []
+    networks: !override
+      - private
     volumes:
       - type: volume
         source: e2e-data
@@ -97,6 +103,9 @@ services:
     command: ["python", "-m", "tests.e2e.seed"]
     init: true
     restart: "no"
+    cpus: 1.0
+    mem_limit: 1g
+    pids_limit: 128
     read_only: true
     tmpfs:
       - /tmp
@@ -117,6 +126,9 @@ services:
     command: ["alembic", "upgrade", "head"]
     init: true
     restart: "no"
+    cpus: 0.5
+    mem_limit: 512m
+    pids_limit: 128
     read_only: true
     tmpfs:
       - /tmp
@@ -145,6 +157,9 @@ services:
       - --no-access-log
     init: true
     restart: "no"
+    cpus: 0.5
+    mem_limit: 512m
+    pids_limit: 128
     read_only: true
     tmpfs:
       - /tmp
@@ -171,7 +186,7 @@ services:
       start_period: 2s
 
   e2e:
-    networks:
+    networks: !override
       - private
 
 volumes:

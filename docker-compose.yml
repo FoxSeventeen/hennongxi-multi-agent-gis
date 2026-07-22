@@ -8,6 +8,9 @@ x-agent-base: &agent-base
   platform: ${TARGET_PLATFORM:-linux/arm64}
   restart: unless-stopped
   init: true
+  cpus: 2.0
+  mem_limit: 2g
+  pids_limit: 256
   read_only: true
   tmpfs:
     - /tmp
@@ -43,6 +46,9 @@ services:
     platform: ${TARGET_PLATFORM:-linux/arm64}
     restart: unless-stopped
     init: true
+    cpus: 0.75
+    mem_limit: 512m
+    pids_limit: 128
     security_opt:
       - no-new-privileges:true
     environment:
@@ -241,6 +247,9 @@ services:
         POSTGIS_PACKAGE_VERSION: ${POSTGIS_PACKAGE_VERSION:-3.6.4+dfsg-2.pgdg12+1}
     platform: ${TARGET_PLATFORM:-linux/arm64}
     restart: unless-stopped
+    cpus: 1.0
+    mem_limit: 1g
+    pids_limit: 256
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-hennongxi}
       POSTGRES_USER: ${POSTGRES_USER:-hennongxi}
@@ -267,6 +276,9 @@ services:
     image: redis:8.8.0-alpine
     platform: ${TARGET_PLATFORM:-linux/arm64}
     restart: unless-stopped
+    cpus: 0.5
+    mem_limit: 512m
+    pids_limit: 128
     command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
     networks:
       - private
@@ -289,6 +301,9 @@ services:
       dockerfile: Dockerfile
     platform: ${TARGET_PLATFORM:-linux/arm64}
     init: true
+    cpus: 2.0
+    mem_limit: 3g
+    pids_limit: 512
     ipc: host
     security_opt:
       - no-new-privileges:true
