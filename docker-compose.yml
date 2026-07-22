@@ -54,6 +54,9 @@ services:
     environment:
       VITE_MASTER_BASE_URL: ${PUBLIC_MASTER_BASE_URL:-http://localhost:8000}
       VITE_PUBLISHER_BASE_URL: ${PUBLIC_PUBLISHER_BASE_URL:-http://localhost:8004}
+      VITE_AMAP_JS_API_KEY: ${VITE_AMAP_JS_API_KEY:-}
+      AMAP_JS_API_SECURITY_CODE: ${AMAP_JS_API_SECURITY_CODE:-}
+      VITE_AMAP_LOAD_TIMEOUT_MS: ${VITE_AMAP_LOAD_TIMEOUT_MS:-5000}
     command: ["pnpm", "exec", "vite", "--host", "0.0.0.0", "--port", "3000"]
     ports:
       - "127.0.0.1:3000:3000"

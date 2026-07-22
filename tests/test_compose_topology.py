@@ -121,21 +121,32 @@ def test_publisher_uses_the_same_approved_data_manifest_as_upstream_agents() -> 
         assert services[service_name]["environment"]["DATA_MANIFEST_PATH"] == expected
 
 
-def test_amap_credential_is_blank_by_default_and_injected_only_into_master() -> None:
+def test_amap_credentials_are_blank_by_default_and_kept_in_their_approved_services() -> None:
     services = load_compose()["services"]
     master_environment = services["master-agent"]["environment"]
+    web_environment = services["web"]["environment"]
 
     assert master_environment["AMAP_WEB_SERVICE_KEY"] == "${AMAP_WEB_SERVICE_KEY:-}"
     assert master_environment["AMAP_TIMEOUT_SECONDS"] == "${AMAP_TIMEOUT_SECONDS:-3}"
+    assert "VITE_AMAP_JS_API_KEY" not in master_environment
+    assert "AMAP_JS_API_SECURITY_CODE" not in master_environment
     assert "AMAP_BASE_URL" not in master_environment
 
+    assert web_environment["VITE_AMAP_JS_API_KEY"] == "${VITE_AMAP_JS_API_KEY:-}"
+    assert web_environment["AMAP_JS_API_SECURITY_CODE"] == "${AMAP_JS_API_SECURITY_CODE:-}"
+    assert web_environment["VITE_AMAP_LOAD_TIMEOUT_MS"] == "${VITE_AMAP_LOAD_TIMEOUT_MS:-5000}"
+    assert "AMAP_WEB_SERVICE_KEY" not in web_environment
+
     for service_name, service in services.items():
-        if service_name != "master-agent":
+        if service_name not in {"master-agent", "web"}:
             assert not any(key.startswith("AMAP_") for key in service.get("environment", {}))
 
     example = ENV_EXAMPLE_PATH.read_text(encoding="utf-8")
     assert "AMAP_WEB_SERVICE_KEY=\n" in example
     assert "AMAP_TIMEOUT_SECONDS=3\n" in example
+    assert "VITE_AMAP_JS_API_KEY=\n" in example
+    assert "AMAP_JS_API_SECURITY_CODE=\n" in example
+    assert "VITE_AMAP_LOAD_TIMEOUT_MS=5000\n" in example
     assert "AMAP_BASE_URL" not in example
 
 

@@ -1,5 +1,8 @@
 services:
   web:
+    environment:
+      VITE_AMAP_JS_API_KEY: ""
+      AMAP_JS_API_SECURITY_CODE: ""
     ports: !reset []
     networks: !override
       - private
