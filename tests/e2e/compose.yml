@@ -1,8 +1,9 @@
 services:
   web:
     environment:
-      VITE_AMAP_JS_API_KEY: ""
-      AMAP_JS_API_SECURITY_CODE: ""
+      VITE_AMAP_JS_API_KEY: deterministic-e2e-js-api-key
+      AMAP_JS_API_SECURITY_CODE: deterministic-e2e-security-code
+      VITE_AMAP_LOAD_TIMEOUT_MS: "5000"
     ports: !reset []
     networks: !override
       - private

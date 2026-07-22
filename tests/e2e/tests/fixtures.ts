@@ -9,10 +9,98 @@ const proxyTargets = [
 ] as const;
 
 interface Diagnostics {
+  readonly amapNetwork: AmapNetworkHarness;
   readonly browserMessages: string[];
 }
 
+export interface AmapNetworkHarness {
+  readonly requests: string[];
+  readonly setMode: (mode: "offline" | "success") => void;
+}
+
+const amapRequestPattern = /^https:\/\/(?:[^/]+\.)?amap\.com\//;
+const amapLoaderPattern = /^https:\/\/webapi\.amap\.com\/maps(?:\?|$)/;
+const deterministicAmapScript = `
+(() => {
+  const lifecycle = {
+    conversions: 0,
+    mapsCreated: 0,
+    mapsDestroyed: 0,
+    lastConversion: null,
+    securityServiceHost: window._AMapSecurityConfig?.serviceHost ?? null,
+  };
+  window.__HENNONXI_E2E_AMAP__ = lifecycle;
+
+  class DeterministicRoadMap {
+    constructor(container) {
+      this.container = container;
+      lifecycle.mapsCreated += 1;
+      container.dataset.e2eAmapState = "ready";
+      const roadSurface = document.createElement("div");
+      roadSurface.dataset.e2eAmapRoadSurface = "true";
+      roadSurface.setAttribute("aria-hidden", "true");
+      roadSurface.style.cssText =
+        "position:absolute;inset:0;background:#dce5da;" +
+        "background-image:linear-gradient(32deg,transparent 47%,#fff 48%,#fff 51%,transparent 52%);";
+      container.appendChild(roadSurface);
+    }
+
+    on(event, listener) {
+      if (event === "complete") {
+        queueMicrotask(listener);
+      }
+    }
+
+    destroy() {
+      lifecycle.mapsDestroyed += 1;
+      this.container.replaceChildren();
+      delete this.container.dataset.e2eAmapState;
+    }
+  }
+
+  window.AMap = {
+    Map: DeterministicRoadMap,
+    convertFrom(point, type, callback) {
+      lifecycle.conversions += 1;
+      lifecycle.lastConversion = { point: [...point], type };
+      callback("complete", {
+        info: "ok",
+        locations: [{ lng: 110.304, lat: 31.259 }],
+      });
+    },
+  };
+  window.___onAPILoaded();
+})();
+`;
+
 export const test = base.extend<Diagnostics>({
+  amapNetwork: [
+    async ({ page }, use) => {
+      const requests: string[] = [];
+      let mode: "offline" | "success" = "success";
+      await page.route(amapRequestPattern, async (route) => {
+        const url = route.request().url();
+        requests.push(url);
+        if (mode === "success" && amapLoaderPattern.test(url)) {
+          await route.fulfill({
+            body: deterministicAmapScript,
+            contentType: "application/javascript; charset=utf-8",
+            status: 200,
+          });
+          return;
+        }
+        await route.abort("failed");
+      });
+
+      await use({
+        requests,
+        setMode(nextMode) {
+          mode = nextMode;
+        },
+      });
+    },
+    { auto: true },
+  ],
   browserMessages: async ({ page }, use, testInfo) => {
     const browserMessages: string[] = [];
     page.on("console", (message) => {
