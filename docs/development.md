@@ -175,7 +175,10 @@ docker compose -p hennongxi-t25 down
 Web 在加载 Loader 前把 `serviceHost` 固定为当前来源的 `/_AMapService`。代理只接受同源浏览器的
 `GET /_AMapService/v3/assistant/coordinate/convert`，并固定转发到批准的高德 HTTPS 路径；
 客户端不能指定 `jscode`、上游、重定向或请求头。代理还有 3 秒上游超时、256 KiB 响应上限和
-8 个并发上限，错误只返回中文通用码。不得为了调试放宽为任意路径代理。
+8 个并发上限，错误只返回中文通用码。坐标转换使用 JSONP 时，代理只接受一个合法 JavaScript
+标识符形式的 `callback`，解析上游 JSON/JSONP 后重新序列化为
+`application/javascript; charset=utf-8`，并保留 `nosniff`；重复、可注入或正文不匹配的回调
+都会被脱敏拒绝。不得为了调试放宽为任意路径代理。
 
 前端回归从 `apps/web` 执行：
 
