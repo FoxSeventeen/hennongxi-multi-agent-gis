@@ -19,6 +19,7 @@
     "typecheck": "tsc -b --pretty false"
   },
   "dependencies": {
+    "@amap/amap-jsapi-loader": "1.0.1",
     "maplibre-gl": "5.24.0",
     "react": "19.2.7",
     "react-dom": "19.2.7"
