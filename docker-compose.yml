@@ -47,7 +47,7 @@ services:
     restart: unless-stopped
     init: true
     cpus: 0.75
-    mem_limit: 512m
+    mem_limit: 1g
     pids_limit: 128
     security_opt:
       - no-new-privileges:true
