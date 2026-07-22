@@ -209,6 +209,37 @@ input:focus-visible,
   inset: 0;
 }
 
+.amap-surface {
+  position: absolute;
+  inset: 0;
+}
+
+.amap-context-note {
+  position: absolute;
+  z-index: 3;
+  top: 18px;
+  right: 18px;
+  width: min(300px, calc(100% - 36px));
+  padding: 11px 13px;
+  display: grid;
+  gap: 3px;
+  color: #f7f8f5;
+  background: rgb(11 42 35 / 90%);
+  border-left: 3px solid var(--amber);
+  box-shadow: 0 8px 24px rgb(11 42 35 / 18%);
+  pointer-events: none;
+}
+
+.amap-context-note strong {
+  font-size: 0.78rem;
+}
+
+.amap-context-note span {
+  color: #d4ded8;
+  font-size: 0.68rem;
+  line-height: 1.5;
+}
+
 .maplibre-surface .maplibregl-canvas {
   cursor: grab;
 }
@@ -739,6 +770,12 @@ input:focus-visible,
   .map-loading {
     top: 12px;
     left: 12px;
+  }
+
+  .amap-context-note {
+    top: 60px;
+    right: 12px;
+    width: calc(100% - 24px);
   }
 }
 

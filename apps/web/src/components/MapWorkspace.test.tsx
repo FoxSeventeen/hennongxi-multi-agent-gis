@@ -1,8 +1,14 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { TaskPublication, TaskTileMetadata } from "../api/task-contract";
+import type {
+  AmapJsApi,
+  AmapLoader,
+  AmapMap,
+  AmapMapOptions,
+} from "../features/map/AmapContextMap";
 import { MapWorkspace } from "./MapWorkspace";
 
 const mapHarness = vi.hoisted(() => {
@@ -43,6 +49,37 @@ vi.mock("maplibre-gl", () => ({
 }));
 
 const taskId = "4f09fc09-6bd2-49fb-9636-7f4fb93baa44";
+
+class MockContextMap implements AmapMap {
+  static instances: MockContextMap[] = [];
+  readonly destroy = vi.fn<() => void>();
+  readonly listeners = new Map<string, () => void>();
+
+  constructor(
+    readonly container: HTMLDivElement,
+    readonly options: AmapMapOptions,
+  ) {
+    MockContextMap.instances.push(this);
+  }
+
+  readonly on = (event: "complete", listener: () => void): void => {
+    this.listeners.set(event, listener);
+  };
+
+  emitComplete(): void {
+    this.listeners.get("complete")?.();
+  }
+}
+
+function createContextLoader(): AmapLoader {
+  const api: AmapJsApi = {
+    Map: MockContextMap,
+    convertFrom: vi.fn<AmapJsApi["convertFrom"]>((_point, _type, callback) => {
+      callback("complete", { info: "ok", locations: [{ lng: 110.3, lat: 31.26 }] });
+    }),
+  };
+  return { load: vi.fn().mockResolvedValue(api) };
+}
 
 function tileMetadata(
   artifactType: TaskTileMetadata["artifactType"],
@@ -93,6 +130,80 @@ const publication: TaskPublication = {
 describe("MapWorkspace", () => {
   beforeEach(() => {
     mapHarness.MockMap.instances.length = 0;
+    MockContextMap.instances.length = 0;
+  });
+
+  it("无成果时显示高德位置参考，并在合法成果到达前复用且随后销毁", async () => {
+    const loader = createContextLoader();
+    const contextMap = { apiKey: "browser-visible-test-key", loader };
+    const { rerender } = render(
+      <MapWorkspace activeTaskId={null} contextMap={contextMap} />,
+    );
+
+    await waitFor(() => {
+      expect(MockContextMap.instances).toHaveLength(1);
+    });
+    act(() => {
+      MockContextMap.instances[0]?.emitComplete();
+    });
+    expect(screen.getByText("等待创建任务；这里不表示遥感分析成果。")).toBeVisible();
+    expect(mapHarness.MockMap.instances).toHaveLength(0);
+
+    rerender(
+      <MapWorkspace
+        activeTaskId={taskId}
+        contextMap={contextMap}
+      />,
+    );
+    expect(screen.getByText(/任务 4f09fc09 正在生成分析成果/)).toBeVisible();
+    expect(MockContextMap.instances).toHaveLength(1);
+    expect(loader.load).toHaveBeenCalledOnce();
+
+    rerender(
+      <MapWorkspace
+        activeTaskId={taskId}
+        publication={publication}
+        publisherBaseUrl="http://localhost:8004"
+        contextMap={contextMap}
+      />,
+    );
+
+    expect(MockContextMap.instances[0]?.destroy).toHaveBeenCalledOnce();
+    expect(mapHarness.MockMap.instances).toHaveLength(1);
+    expect(screen.queryByText("高德位置参考")).not.toBeInTheDocument();
+  });
+
+  it("无高德配置时保持现有离线占位图，任务文案不受影响", () => {
+    render(
+      <MapWorkspace
+        activeTaskId={taskId}
+        contextMap={{ apiKey: "", loader: createContextLoader() }}
+      />,
+    );
+
+    expect(screen.getByText("等待分析图层")).toBeVisible();
+    expect(screen.getByText(/任务 4f09fc09 正在执行/)).toBeVisible();
+    expect(MockContextMap.instances).toHaveLength(0);
+  });
+
+  it("非法成果契约显示不可用状态，不用高德背景掩盖错误", () => {
+    const loader = createContextLoader();
+    const invalidPublication: TaskPublication = {
+      ...publication,
+      resources: publication.resources.slice(0, 2),
+    };
+
+    render(
+      <MapWorkspace
+        activeTaskId={taskId}
+        publication={invalidPublication}
+        contextMap={{ apiKey: "browser-visible-test-key", loader }}
+      />,
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent("地图图层暂不可用");
+    expect(loader.load).not.toHaveBeenCalled();
+    expect(MockContextMap.instances).toHaveLength(0);
   });
 
   it("以差值图层为默认值，保持流域边界在最上层并可切换三个 NDVI 图层", async () => {

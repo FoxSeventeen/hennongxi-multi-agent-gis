@@ -45,11 +45,14 @@ export interface AmapLoader {
   readonly load: (options: AmapLoadOptions) => Promise<unknown>;
 }
 
-interface AmapContextMapProps {
-  readonly activeTaskId: string | null;
+export interface AmapContextMapConfig {
   readonly apiKey?: string;
   readonly loadTimeoutMs?: number;
   readonly loader?: AmapLoader;
+}
+
+interface AmapContextMapProps extends AmapContextMapConfig {
+  readonly activeTaskId: string | null;
   readonly fallback: ReactNode;
 }
 

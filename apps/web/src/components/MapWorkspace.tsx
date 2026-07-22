@@ -8,6 +8,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { TaskPublication } from "../api/task-contract";
 import watershedBoundary from "../data/shennongxi-watershed.json";
 import {
+  AmapContextMap,
+  type AmapContextMapConfig,
+} from "../features/map/AmapContextMap";
+import {
   buildMapPresentation,
   type DisplayTileArtifactType,
   type MapDisplayLayer,
@@ -16,6 +20,7 @@ import {
 
 interface MapWorkspaceProps {
   readonly activeTaskId: string | null;
+  readonly contextMap?: AmapContextMapConfig;
   readonly publication?: TaskPublication | null;
   readonly publisherBaseUrl?: string;
 }
@@ -40,6 +45,7 @@ const emptyMapStyle: StyleSpecification = {
 
 export function MapWorkspace({
   activeTaskId,
+  contextMap,
   publication = null,
   publisherBaseUrl = "http://localhost:8004",
 }: MapWorkspaceProps) {
@@ -69,7 +75,11 @@ export function MapWorkspace({
       </div>
 
       {presentationResult === null ? (
-        <MapPlaceholder activeTaskId={activeTaskId} />
+        <AmapContextMap
+          {...(contextMap ?? {})}
+          activeTaskId={activeTaskId}
+          fallback={<MapPlaceholder activeTaskId={activeTaskId} />}
+        />
       ) : presentationResult.status === "unavailable" ? (
         <MapUnavailable message={presentationResult.message} />
       ) : (
