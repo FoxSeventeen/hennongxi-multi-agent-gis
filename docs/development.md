@@ -72,7 +72,8 @@ docker compose run --rm --build --no-deps master-agent \
 
 ## 真实高德研究区校验冒烟
 
-高德调用只在操作员显式执行冒烟命令时发生，默认单元测试全部使用本地假响应。创建已被
+Master 的高德 Web 服务调用只在操作员显式执行冒烟命令或创建真实任务时发生，默认单元测试
+全部使用本地假响应。创建已被
 `.gitignore` 覆盖的 `.env.amap.local`，只在其中配置 Web 服务 Key：
 
 ```dotenv
@@ -156,6 +157,50 @@ docker compose -p hennongxi-t25 down
 计划只能使用明确标记的恢复计划并持久化失败证据；非目标地区、损坏数据、不可达 Agent 和缺失
 分析成果均不会进入发布完成态。若确认不再需要隔离数据库，可显式执行
 `docker compose -p hennongxi-t25 down --volumes`，不得把 `--volumes` 用于日常演示项目。
+
+## Web 高德上下文地图与 MapLibre 成果切换
+
+高德浏览器地图使用官方 `@amap/amap-jsapi-loader` 加载 JS API 2.0。没有合法 publication 时，
+页面把固定 WGS84 中心点 `[110.299073, 31.262497]` 以 `AMap.convertFrom(point, "gps")` 临时
+转换，只创建默认 2D 普通道路地图；任务 ID、提示词、流域几何、栅格、统计和报告都不会进入
+高德请求。合法 publication 到达后组件调用 `destroy()`，由既有 MapLibre 独占显示三类 NDVI
+图层、完整流域、图例和 attribution；非法 publication 仍显示“地图图层暂不可用”。
+
+三项配置边界必须保持独立：
+
+- `AMAP_WEB_SERVICE_KEY` 只属于 Master 的地名校验；
+- `VITE_AMAP_JS_API_KEY` 是浏览器可见的专用 Web端（JS API）Key；
+- `AMAP_JS_API_SECURITY_CODE` 只由 Vite/Web 服务端读取，不能使用 `VITE_` 前缀。
+
+Web 在加载 Loader 前把 `serviceHost` 固定为当前来源的 `/_AMapService`。代理只接受同源浏览器的
+`GET /_AMapService/v3/assistant/coordinate/convert`，并固定转发到批准的高德 HTTPS 路径；
+客户端不能指定 `jscode`、上游、重定向或请求头。代理还有 3 秒上游超时、256 KiB 响应上限和
+8 个并发上限，错误只返回中文通用码。不得为了调试放宽为任意路径代理。
+
+前端回归从 `apps/web` 执行：
+
+```bash
+cd apps/web
+pnpm exec vitest run
+pnpm exec tsc -b --pretty false
+pnpm exec eslint .
+pnpm exec vite build
+pnpm audit --prod --audit-level high
+cd ../..
+```
+
+组件测试覆盖未配置、成功、任务更新复用、5 秒超时、Loader/转换失败、卸载竞态、成果切换和
+MapLibre 回归。默认 Compose E2E 在隔离私网中使用确定性占位 Key，并用 Playwright 路由拦截
+`webapi.amap.com` 后返回假 Loader；另一条旅程主动阻断该路由，验证离线占位图和任务完整完成。
+运行：
+
+```bash
+./tests/e2e/run.sh
+```
+
+预期 `5 passed`。这套 E2E 不读取 `.env` 中的真实高德配置、不访问真实高德、不消耗额度，也不
+证明在线地图、官方 Logo/版权或真实 Key 权限正确。真实浏览器冒烟和证据限制按
+[`setup.md`](setup.md) 与 [`verification.md`](verification.md) 执行。
 
 ## Compose 运行时
 

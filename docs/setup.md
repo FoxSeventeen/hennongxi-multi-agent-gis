@@ -10,7 +10,8 @@
 
 1. Git 仓库源码；
 2. 不进入 Git 的四个已批准 GeoTIFF；
-3. 不进入 Git 的大模型配置，以及一枚可在交接后轮换的高德 Web 服务 Key（高德可选）。
+3. 不进入 Git 的大模型配置；如启用高德，再取得可轮换的 Web 服务 Key、独立 Web端（JS API）
+   Key 和与后者配套的安全密钥。
 
 源码仓库不应包含 `.env`、真实 Key、原始/缓存影像、生成栅格、PDF、日志、Playwright 截图或
 Trace。开始前执行：
@@ -67,10 +68,33 @@ git check-ignore -v .env
 | `LLM_TIMEOUT_SECONDS` | 否 | 默认 30 秒，答辩前不要无证据地放大 |
 | `AMAP_WEB_SERVICE_KEY` | 否 | 高德 Web 服务 Key，只用于研究区地名校验 |
 | `AMAP_TIMEOUT_SECONDS` | 否 | 默认 3 秒，保证可选增强不会长时间阻塞 |
+| `VITE_AMAP_JS_API_KEY` | 否 | 独立的高德 Web端（JS API）Key；按官方机制会进入浏览器 |
+| `AMAP_JS_API_SECURITY_CODE` | 否 | 与 JS API Key 配套的安全密钥，只注入 Web 服务端同源代理 |
+| `VITE_AMAP_LOAD_TIMEOUT_MS` | 否 | 默认 5000 毫秒；有效范围 1000–15000，异常值回到默认值 |
 
-不要使用前端变量保存 Key，不要在终端执行带真实值的 `export ...` 命令，不要把配置粘贴到 issue、
-截图、演示文稿或验收文档。Key 曾经出现在聊天、屏幕共享或其他公开位置时，交付前必须在供应商
-控制台轮换；轮换后只更新本机 `.env`。
+只有 `VITE_AMAP_JS_API_KEY` 允许作为浏览器可见变量；不要把 Web 服务 Key 或安全密钥放入任何
+`VITE_*` 变量。不要在终端执行带真实值的 `export ...` 命令，也不要把配置粘贴到 issue、截图、
+演示文稿或验收文档。Key/安全密钥曾经出现在聊天、屏幕共享或其他公开位置时，交付前必须在
+供应商控制台轮换；轮换后只更新本机 `.env` 并重建对应容器。
+
+### 申请并配置高德两类能力
+
+1. 登录[高德开放平台控制台](https://console.amap.com/dev/index)，按平台要求完成开发者认证，
+   创建或选择本项目专用应用。
+2. 为浏览器上下文地图新增一个“Web端（JS API）”Key，同时记录控制台签发的
+   `securityJsCode`。将 Key 写入 `VITE_AMAP_JS_API_KEY`，将安全密钥写入
+   `AMAP_JS_API_SECURITY_CODE`。二者必须来自同一应用/配置。
+3. 如需 Master 的研究区地名校验，再单独新增一个“Web 服务”Key，写入
+   `AMAP_WEB_SERVICE_KEY`。即使控制台允许，也不要把这个 Key 复用于浏览器地图。
+4. 若控制台提供绑定域名或白名单，只允许实际演示来源；本机开发使用 `localhost` 和
+   `127.0.0.1`，正式部署只填真实域名，不能使用任意域名通配。检查 JS API 和 Web 服务各自的
+   配额、权限和到期/轮换计划。
+
+官方申请说明见[Web端（JS API）准备工作](https://lbs.amap.com/api/javascript-api-v2/prerequisites)，
+服务端安全代理要求见[安全密钥使用说明](https://lbs.amap.com/api/javascript-api-v2/guide/abc/jscode)。
+本项目不会采用把 `securityJsCode` 明文写入前端的方案；浏览器只设置同源
+`/_AMapService`，代理在服务端追加安全密钥。Web端 Key 本身不是服务端秘密，但仍必须专用、
+受域名限制并在曝光后轮换。
 
 检查配置文件仍未被 Git 跟踪：
 
@@ -159,7 +183,7 @@ docker compose run --rm --no-deps master-agent \
 | 2 | 配置缺失 |
 | 3 | 冒烟程序内部错误 |
 
-### 高德（可选）
+### 高德 Web 服务研究区校验（可选）
 
 ```bash
 docker compose run --rm --no-deps master-agent \
@@ -171,6 +195,23 @@ docker compose run --rm --no-deps master-agent \
 2 表示未配置，3 表示内部错误。高德失败不等于遥感主链不可用。
 
 冒烟会产生真实 API 调用和额度消耗，只在配置/轮换后或正式演练前执行，不要在自动化循环中运行。
+
+### 高德浏览器上下文地图（可选）
+
+配置或轮换 `VITE_AMAP_JS_API_KEY` / `AMAP_JS_API_SECURITY_CODE` 后重建 Web：
+
+```bash
+docker compose up --detach --wait --force-recreate web
+```
+
+打开 [http://localhost:3000](http://localhost:3000)，在没有任务时确认普通道路图、官方 Logo/版权
+和“高德位置参考”可见；创建任务后地图实例应保持，状态文案显示任务短 ID；合法成果到达后页面
+应销毁高德实例并切换为 MapLibre 的前期 NDVI、后期 NDVI 和 NDVI 差值图层。
+
+真实检查会消耗 JS API 额度。浏览器开发者工具只记录检查时间、加载状态、耗时、脱敏错误码和
+访问域名集合；不得保存 Key、安全密钥、原始响应、转换坐标或高德地图截图。随后在不投屏时把
+两个浏览器地图变量暂时置空并重建 Web：页面应直接显示“地图已就位”的离线占位图，不发出高德
+请求，任务创建仍可用。恢复变量后再次重建 Web。
 
 ## 7. 启动完整系统
 
@@ -187,10 +228,12 @@ curl --fail --silent --show-error http://127.0.0.1:8000/api/v1/config/readiness
 - 聚合健康响应的 `state` 为 `HEALTHY`；
 - 就绪响应为 `ready: true`、`llm_configured: true`、`data_configured: true`、`blockers: []`；
 - [http://localhost:3000](http://localhost:3000) 显示“系统已就绪”；
+- 配置独立 Web端凭据时显示高德普通道路位置参考；否则显示可用的离线占位图；
 - 宿主机只使用 `127.0.0.1:3000`、`:8000`、`:8004`。
 
-就绪接口验证的是配置存在、数据清单可读和运行依赖健康，不会替代真实大模型/高德冒烟，也不会
-提前扫描命名卷中的四个大栅格；因此数据预检和至少一次真实任务仍然必需。
+就绪接口验证的是 Master 配置存在、数据清单可读和运行依赖健康，不会替代真实大模型、高德 Web
+服务或浏览器上下文地图冒烟，也不会提前扫描命名卷中的四个大栅格；因此数据预检和至少一次真实
+任务仍然必需。高德 JS API 未配置不会成为就绪 blocker。
 
 ## 8. 日常启动、升级与停止
 
@@ -231,6 +274,7 @@ docker volume prune
 - [ ] PostGIS 已迁移到 head，四个栅格已复制到 `data-cache` 卷。
 - [ ] 八个常驻服务健康，聚合健康与配置就绪均通过。
 - [ ] 真实大模型冒烟通过并只记录脱敏证据。
-- [ ] 如答辩需要展示高德，真实高德冒烟通过且已确认当日额度/状态。
+- [ ] 如展示在线研究区校验，高德 Web 服务冒烟通过且已确认当日额度/状态。
+- [ ] 如展示高德上下文地图，独立 Web端 Key/安全密钥在线检查和断网回退均通过；未保存地图截图。
 - [ ] 浏览器能访问 Web，控制台没有错误，未通过公网暴露端口。
 - [ ] 已阅读演示手册和排障文档，知道如何非破坏性停止。
