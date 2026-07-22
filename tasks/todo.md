@@ -22,6 +22,8 @@ Source of truth: `docs/spec.md` at `92e50a6`. Detailed rationale, file scope, an
 - [x] G4：在容器验证前启动 OrbStack/Docker。
 - [x] G5：已批准后端专用、可降级的高德研究区校验边界；详见
   `tasks/approvals/G5-amap-web-service-integration.md`。
+- [x] G6：已批准高德普通道路上下文地图、任务期间持续显示、成果态切回 MapLibre，以及
+  高德不可用时回退现有离线占位图；详见 `tasks/approvals/G6-amap-context-map.md`。
 
 ## Day 1 — Contract and runnable foundation
 
@@ -219,7 +221,16 @@ Source of truth: `docs/spec.md` at `92e50a6`. Detailed rationale, file scope, an
   - [x] 覆盖输入、模型/高德响应、SSRF、路径、跨任务、超时、资源和密钥脱敏威胁。
   - [x] 跨容器追踪同一尝试，并区分必需依赖故障与高德可选增强降级。
   - [x] 全量回归及人工密钥、路径、跨任务和高德数据留存检查通过。
-- [ ] **T28 演练真实答辩并完成交付文档**（依赖：T05、T14、T27；门禁：G2-G5）
+- [ ] **T29 接入高德上下文地图并保留 MapLibre 成果地图**（依赖：T21-T22、T27；门禁：G6）
+  - [ ] 分离 Web JS API Key、服务端安全密钥和既有 Web 服务 Key；实现固定同源、只读、
+    有路径/超时/响应/并发上限且不泄密的安全代理。
+  - [ ] 无任务、任务执行中和无成果失败态显示高德普通道路地图；未配置、超时、鉴权或网络
+    失败时在 5 秒内稳定回退现有离线占位图，且不阻断任务。
+  - [ ] 合法成果到达后销毁高德实例并复用既有 MapLibre 三类成果图层；非法成果继续显示
+    “地图图层暂不可用”，不让高德背景掩盖成果错误。
+  - [ ] 组件和默认 E2E 使用假 Loader/网络拦截；完成凭据扫描、无留存检查、真实浏览器在线
+    冒烟和断网回退后，才允许勾选本任务。
+- [ ] **T28 演练真实答辩并完成交付文档**（依赖：T05、T14、T27、T29；门禁：G2-G6）
   - [ ] 记录真实 LLM/栅格/高德冒烟运行的 ID、耗时、校验和与证据。
   - [ ] 证明刷新、强制失败/重试、温缓存及关闭高德网络后的离线主链。
   - [ ] 在目标机器验证配置、预检、演示、状态码/额度、Key 轮换、排障与非破坏性停止文档。
@@ -228,7 +239,7 @@ Source of truth: `docs/spec.md` at `92e50a6`. Detailed rationale, file scope, an
 
 ### 检查点 H2 与最终检查点
 
-- [ ] T25-T28 可从仓库根目录通过文档化命令执行。
+- [ ] T25-T29 可从仓库根目录通过文档化命令执行。
 - [ ] 规格 12 项成功标准均有自动化或具名演练证据，Definition of Done 全部满足。
 - [ ] `docker compose up --build` 与所有一键检查在目标机器通过。
 - [ ] 演示不依赖下载影像或高德在线可用；`git status --short` 只含预期源码/文档。
