@@ -26,6 +26,8 @@ from hennongxi_contracts import (
 )
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
+from hennongxi_master.http_safety import response_body_is_declared_unsafe
+
 MAX_AGENT_RESPONSE_BYTES = 512 * 1024
 _LOGGER = structlog.get_logger("hennongxi.master.agent_client")
 
@@ -203,6 +205,7 @@ class AgentHttpClient:
         _LOGGER.info("agent_call_started", **fields)
         headers = {
             "Accept": "application/json",
+            "Accept-Encoding": "identity",
             "X-Correlation-ID": str(command.correlation_id),
         }
         if idempotency_key is not None:
@@ -306,6 +309,9 @@ async def _read_bounded_body(
     step_id: str,
     started: float,
 ) -> bytes:
+    if response_body_is_declared_unsafe(response, max_bytes=MAX_AGENT_RESPONSE_BYTES):
+        raise _invalid_response(agent, step_id, _elapsed_ms(started))
+
     body = bytearray()
     async for chunk in response.aiter_bytes():
         if len(body) + len(chunk) > MAX_AGENT_RESPONSE_BYTES:

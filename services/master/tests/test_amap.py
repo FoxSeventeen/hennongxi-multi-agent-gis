@@ -427,7 +427,11 @@ async def test_amap_verifier_never_reads_non_200_response_body() -> None:
     "headers",
     [
         {"content-encoding": "gzip"},
+        {"content-encoding": ""},
+        {"content-encoding": "\x0bidentity"},
         {"content-length": str(MAX_AMAP_RESPONSE_BYTES + 1)},
+        {"content-length": "1_0"},
+        {"content-length": "9" * 5_000},
     ],
 )
 @pytest.mark.asyncio

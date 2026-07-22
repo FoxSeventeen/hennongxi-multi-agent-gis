@@ -22,6 +22,8 @@ from pydantic import (
     model_validator,
 )
 
+from hennongxi_master.http_safety import response_body_is_declared_unsafe
+
 # AMap Web Service POI search endpoint. The origin is intentionally not configurable.
 # Source: https://lbs.amap.com/api/webservice/guide/api/search/
 AMAP_ORIGIN: Final = "https://restapi.amap.com"
@@ -225,7 +227,10 @@ class AmapStudyAreaVerifier:
                         checked_at=checked_at,
                         timer_started=timer_started,
                     )
-                if _response_body_is_declared_unsafe(response):
+                if response_body_is_declared_unsafe(
+                    response,
+                    max_bytes=MAX_AMAP_RESPONSE_BYTES,
+                ):
                     return self._result(
                         code=AmapVerificationCode.RESPONSE_INVALID,
                         checked_at=checked_at,
@@ -335,21 +340,6 @@ def _map_provider_failure(envelope: _AmapEnvelope) -> AmapVerificationCode:
     if envelope.infocode in _REJECTED_INFOCODES:
         return AmapVerificationCode.REQUEST_REJECTED
     return AmapVerificationCode.RESPONSE_INVALID
-
-
-def _response_body_is_declared_unsafe(response: httpx.Response) -> bool:
-    content_encoding = response.headers.get("content-encoding", "identity").strip().lower()
-    if content_encoding not in {"", "identity"}:
-        return True
-
-    declared_length = response.headers.get("content-length")
-    if declared_length is None:
-        return False
-    try:
-        content_length = int(declared_length)
-    except ValueError:
-        return True
-    return content_length < 0 or content_length > MAX_AMAP_RESPONSE_BYTES
 
 
 async def _read_bounded_response(response: httpx.Response) -> bytes:

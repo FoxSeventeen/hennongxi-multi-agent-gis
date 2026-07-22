@@ -26,6 +26,7 @@ from pydantic import (
     field_validator,
 )
 
+from hennongxi_master.http_safety import response_body_is_declared_unsafe
 from hennongxi_master.planning import (
     MAX_PROVIDER_CONTENT_CHARS,
     LlmPlanValidationError,
@@ -173,6 +174,7 @@ class LlmPlanningAdapter:
                 f"{self.config.base_url}/chat/completions",
                 headers={
                     "Accept": "application/json",
+                    "Accept-Encoding": "identity",
                     "Authorization": f"Bearer {self.config.api_key.get_secret_value()}",
                     "X-Client-Request-Id": str(plan_id),
                 },
@@ -188,6 +190,11 @@ class LlmPlanningAdapter:
                         started_at=started_at,
                         timer_started=timer_started,
                     )
+                if response_body_is_declared_unsafe(
+                    response,
+                    max_bytes=MAX_PROVIDER_RESPONSE_BYTES,
+                ):
+                    raise _ProviderResponseTooLarge
                 response_body = await _read_bounded_response(response)
 
             response_digest = sha256(response_body).hexdigest()

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
@@ -36,6 +37,21 @@ OTHER_TASK_ID = UUID("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
 CORRELATION_ID = UUID("cccccccc-cccc-4ccc-8ccc-cccccccccccc")
 NOW = datetime(2026, 7, 21, 8, 0, tzinfo=UTC)
 SHA256 = "a" * 64
+
+
+class FailIfReadStream(httpx.AsyncByteStream):
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        raise AssertionError("unsafe Agent response body must not be read")
+        yield b"unreachable-private-agent-body"
+
+
+class ChunkedResponseStream(httpx.AsyncByteStream):
+    def __init__(self, chunks: tuple[bytes, ...]) -> None:
+        self._chunks = chunks
+
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        for chunk in self._chunks:
+            yield chunk
 
 
 def _config() -> AgentClientConfig:
@@ -173,6 +189,7 @@ async def test_data_call_uses_fixed_route_and_propagates_correlation_identity() 
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url == httpx.URL("http://data-agent:8001/internal/v1/data/prepare")
         assert request.headers["X-Correlation-ID"] == str(CORRELATION_ID)
+        assert request.headers["Accept-Encoding"] == "identity"
         assert DataPrepareCommand.model_validate_json(request.content) == command
         result = DataPrepareResult(
             task_id=TASK_ID,
@@ -299,10 +316,47 @@ async def test_timeout_and_oversized_response_fail_without_leaking_transport_det
     assert private_timeout not in str(timeout_error.value)
 
     def oversized_handler(_request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, content=b"x" * (512 * 1024 + 1))
+        return httpx.Response(
+            200,
+            stream=ChunkedResponseStream((b"x" * (512 * 1024), b"x")),
+        )
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(oversized_handler)) as client:
         with pytest.raises(AgentCallError) as oversized_error:
             await AgentHttpClient(_config(), client).prepare_data(_data_command())
 
     assert oversized_error.value.error.code is ErrorCode.INTERNAL_ERROR
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {"content-encoding": "gzip"},
+        {"content-encoding": ""},
+        {"content-encoding": "\x0bidentity"},
+        {"content-length": str(512 * 1024 + 1)},
+        {"content-length": "+1"},
+        {"content-length": "9" * 5_000},
+    ],
+    ids=[
+        "encoded",
+        "empty-encoding",
+        "invalid-encoding-whitespace",
+        "declared-oversized",
+        "invalid-length",
+        "pathological-length",
+    ],
+)
+@pytest.mark.asyncio
+async def test_agent_client_rejects_unsafe_response_before_reading_body(
+    headers: dict[str, str],
+) -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, headers=headers, stream=FailIfReadStream())
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(AgentCallError) as raised:
+            await AgentHttpClient(_config(), client).prepare_data(_data_command())
+
+    assert raised.value.error.code is ErrorCode.INTERNAL_ERROR
+    assert raised.value.error.retryable is True

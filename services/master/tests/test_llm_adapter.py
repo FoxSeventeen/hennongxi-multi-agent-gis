@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import AsyncIterator
 from hashlib import sha256
 from typing import Any
 from uuid import UUID
@@ -22,6 +23,21 @@ BASE_URL = "https://private-provider.example/v1/"
 MODEL = "approved-model"
 QUERY = "监测神农溪流域两期 NDVI 变化，并生成中文报告"
 PRIVATE_PROVIDER_DETAIL = "private-provider-response-detail"
+
+
+class FailIfReadStream(httpx.AsyncByteStream):
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        raise AssertionError("unsafe provider response body must not be read")
+        yield b"unreachable-private-provider-body"
+
+
+class ChunkedResponseStream(httpx.AsyncByteStream):
+    def __init__(self, chunks: tuple[bytes, ...]) -> None:
+        self._chunks = chunks
+
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        for chunk in self._chunks:
+            yield chunk
 
 
 def provider_plan() -> dict[str, object]:
@@ -141,6 +157,7 @@ async def test_llm_adapter_sends_bounded_request_and_returns_sanitized_plan() ->
     assert request.method == "POST"
     assert str(request.url) == "https://private-provider.example/v1/chat/completions"
     assert request.headers["authorization"] == f"Bearer {FAKE_CREDENTIAL}"
+    assert request.headers["accept-encoding"] == "identity"
     assert FAKE_CREDENTIAL.encode() not in request.content
     request_payload = json.loads(request.content)
     assert request_payload["model"] == MODEL
@@ -253,12 +270,15 @@ async def test_llm_adapter_maps_malformed_envelope_without_echoing_response() ->
 
 @pytest.mark.asyncio
 async def test_llm_adapter_rejects_oversized_response_without_retaining_it() -> None:
-    raw_response = (PRIVATE_PROVIDER_DETAIL.encode() * MAX_PROVIDER_RESPONSE_BYTES)[
-        : MAX_PROVIDER_RESPONSE_BYTES + 1
-    ]
+    private_chunk = PRIVATE_PROVIDER_DETAIL.encode()
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, content=raw_response)
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            stream=ChunkedResponseStream(
+                (private_chunk * (MAX_PROVIDER_RESPONSE_BYTES // len(private_chunk)), private_chunk)
+            ),
+        )
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         with pytest.raises(LlmPlanningError) as raised:
@@ -271,6 +291,44 @@ async def test_llm_adapter_rejects_oversized_response_without_retaining_it() -> 
     assert raised.value.retryable is True
     assert raised.value.model_call.response_sha256 is None
     assert_sanitized_error(raised.value, PRIVATE_PROVIDER_DETAIL)
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {"content-encoding": "gzip"},
+        {"content-encoding": ""},
+        {"content-encoding": "\x0bidentity"},
+        {"content-length": str(MAX_PROVIDER_RESPONSE_BYTES + 1)},
+        {"content-length": "1_0"},
+        {"content-length": "9" * 5_000},
+    ],
+    ids=[
+        "encoded",
+        "empty-encoding",
+        "invalid-encoding-whitespace",
+        "declared-oversized",
+        "invalid-length",
+        "pathological-length",
+    ],
+)
+@pytest.mark.asyncio
+async def test_llm_adapter_rejects_unsafe_response_before_reading_body(
+    headers: dict[str, str],
+) -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, headers=headers, stream=FailIfReadStream())
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(LlmPlanningError) as raised:
+            await LlmPlanningAdapter(llm_config(), client).create_plan(
+                task_id=TASK_ID,
+                query=QUERY,
+            )
+
+    assert raised.value.code == "LLM_RESPONSE_INVALID"
+    assert raised.value.retryable is True
+    assert raised.value.model_call.response_sha256 is None
 
 
 @pytest.mark.asyncio
