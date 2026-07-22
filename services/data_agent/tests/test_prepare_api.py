@@ -21,10 +21,24 @@ from hennongxi_data_agent.main import app
 from hennongxi_data_agent.preparation import DataPreparer
 from hennongxi_observability import CORRELATION_ID_HEADER
 from rasterio.transform import from_origin
+from structlog.testing import capture_logs
 
 TASK_ID = UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
 CORRELATION_ID = UUID("cccccccc-cccc-4ccc-8ccc-cccccccccccc")
 RASTER_IDS = tuple(dataset_id for dataset_id in LogicalDatasetId if dataset_id != "watershed")
+
+
+class _FailingPreparer:
+    def __init__(self, error: Exception) -> None:
+        self._error = error
+
+    def prepare(self, _command: object) -> DataPrepareResult:
+        raise self._error
+
+
+class _InvalidPreparer:
+    def prepare(self, _command: object) -> object:
+        return {"private_path": "/tmp/private-invalid-result"}
 
 
 def _sha256(path: Path) -> str:
@@ -179,6 +193,18 @@ def _command() -> dict[str, object]:
     }
 
 
+def _headers(correlation_id: UUID = CORRELATION_ID) -> dict[str, str]:
+    return {CORRELATION_ID_HEADER: str(correlation_id)}
+
+
+def test_prepare_route_declares_every_structured_error_response() -> None:
+    route = next(
+        route for route in app.routes if getattr(route, "path", None) == "/internal/v1/data/prepare"
+    )
+
+    assert route.responses[500]["model"] is ErrorResponse
+
+
 def _replace_raster_and_manifest(
     manifest_path: Path,
     cache_dir: Path,
@@ -215,12 +241,12 @@ def _under_covering(manifest_path: Path, cache_dir: Path) -> None:
 def test_prepare_returns_contract_metadata_without_any_local_path(
     configured_app: tuple[FastAPI, Path, Path],
 ) -> None:
-    configured, _, _ = configured_app
-    with TestClient(configured) as client:
+    configured, _, cache_dir = configured_app
+    with capture_logs() as logs, TestClient(configured) as client:
         response = client.post(
             "/internal/v1/data/prepare",
             json=_command(),
-            headers={CORRELATION_ID_HEADER: str(CORRELATION_ID)},
+            headers=_headers(),
         )
 
     result = DataPrepareResult.model_validate(response.json())
@@ -234,6 +260,16 @@ def test_prepare_returns_contract_metadata_without_any_local_path(
     assert all(asset.grid is not None for asset in result.assets[1:])
     assert "path" not in response.text
     assert "example.test" not in response.text
+    started = next(log for log in logs if log["event"] == "data_prepare_started")
+    completed = next(log for log in logs if log["event"] == "data_prepare_completed")
+    for record in (started, completed):
+        assert record["task_id"] == str(TASK_ID)
+        assert record["step_id"] == "prepare_data"
+        assert record["attempt"] == 1
+        assert record["correlation_id"] == str(CORRELATION_ID)
+    assert completed["asset_count"] == len(LogicalDatasetId)
+    assert str(cache_dir) not in str(logs)
+    assert "example.test" not in str(logs)
 
 
 @pytest.mark.parametrize(
@@ -249,7 +285,11 @@ def test_invalid_cached_data_returns_sanitized_structured_failure(
     invalidate(manifest_path, cache_dir)
 
     with TestClient(configured) as client:
-        response = client.post("/internal/v1/data/prepare", json=_command())
+        response = client.post(
+            "/internal/v1/data/prepare",
+            json=_command(),
+            headers=_headers(),
+        )
 
     error = ErrorResponse.model_validate(response.json())
     assert response.status_code == 409
@@ -268,7 +308,11 @@ def test_prepare_rejects_path_injection_with_the_structured_error_contract(
     payload["input_path"] = "/etc/passwd"
 
     with TestClient(configured) as client:
-        response = client.post("/internal/v1/data/prepare", json=payload)
+        response = client.post(
+            "/internal/v1/data/prepare",
+            json=payload,
+            headers=_headers(),
+        )
 
     error = ErrorResponse.model_validate(response.json())
     assert response.status_code == 422
@@ -288,11 +332,111 @@ def test_missing_manifest_returns_sanitized_dependency_failure(
         cache_dir=cache_dir,
     )
 
-    with TestClient(configured) as client:
-        response = client.post("/internal/v1/data/prepare", json=_command())
+    with capture_logs() as logs, TestClient(configured) as client:
+        response = client.post(
+            "/internal/v1/data/prepare",
+            json=_command(),
+            headers=_headers(),
+        )
 
     error = ErrorResponse.model_validate(response.json())
     assert response.status_code == 503
     assert error.error.code is ErrorCode.DEPENDENCY_UNAVAILABLE
     assert error.error.retryable
     assert str(tmp_path) not in response.text
+    failed = next(log for log in logs if log["event"] == "data_prepare_failed")
+    assert failed["task_id"] == str(TASK_ID)
+    assert failed["attempt"] == 1
+    assert failed["correlation_id"] == str(CORRELATION_ID)
+    assert failed["error_code"] == ErrorCode.DEPENDENCY_UNAVAILABLE.value
+    assert str(tmp_path) not in str(logs)
+
+
+def test_prepare_requires_correlation_identity_header(
+    configured_app: tuple[FastAPI, Path, Path],
+) -> None:
+    configured, _, _ = configured_app
+
+    with TestClient(configured) as client:
+        response = client.post("/internal/v1/data/prepare", json=_command())
+
+    error = ErrorResponse.model_validate(response.json())
+    assert response.status_code == 422
+    assert error.error.code is ErrorCode.VALIDATION_ERROR
+
+
+def test_prepare_rejects_mismatched_correlation_identity(
+    configured_app: tuple[FastAPI, Path, Path],
+) -> None:
+    configured, _, _ = configured_app
+    other_correlation_id = UUID("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee")
+
+    with TestClient(configured) as client:
+        response = client.post(
+            "/internal/v1/data/prepare",
+            json=_command(),
+            headers=_headers(other_correlation_id),
+        )
+
+    error = ErrorResponse.model_validate(response.json())
+    assert response.status_code == 422
+    assert error.error.code is ErrorCode.VALIDATION_ERROR
+    assert not error.error.retryable
+
+
+def test_prepare_sanitizes_unexpected_failures(
+    configured_app: tuple[FastAPI, Path, Path],
+) -> None:
+    configured, _, _ = configured_app
+    configured.state.data_preparer = _FailingPreparer(RuntimeError("secret /tmp/private"))
+
+    with (
+        capture_logs() as logs,
+        TestClient(
+            configured,
+            raise_server_exceptions=False,
+        ) as client,
+    ):
+        response = client.post(
+            "/internal/v1/data/prepare",
+            json=_command(),
+            headers=_headers(),
+        )
+
+    error = ErrorResponse.model_validate(response.json())
+    assert response.status_code == 500
+    assert error.error.code is ErrorCode.INTERNAL_ERROR
+    assert "secret" not in response.text.lower()
+    assert "/tmp/private" not in response.text
+    assert "secret" not in str(logs).lower()
+    assert "/tmp/private" not in str(logs)
+
+
+def test_prepare_sanitizes_invalid_internal_result(
+    configured_app: tuple[FastAPI, Path, Path],
+) -> None:
+    configured, _, _ = configured_app
+    configured.state.data_preparer = _InvalidPreparer()
+
+    with (
+        capture_logs() as logs,
+        TestClient(
+            configured,
+            raise_server_exceptions=False,
+        ) as client,
+    ):
+        response = client.post(
+            "/internal/v1/data/prepare",
+            json=_command(),
+            headers=_headers(),
+        )
+
+    error = ErrorResponse.model_validate(response.json())
+    assert response.status_code == 500
+    assert error.error.code is ErrorCode.INTERNAL_ERROR
+    assert "/tmp/private-invalid-result" not in response.text
+    assert "/tmp/private-invalid-result" not in str(logs)
+    failed = next(log for log in logs if log["event"] == "data_prepare_unexpected_failure")
+    assert failed["task_id"] == str(TASK_ID)
+    assert failed["attempt"] == 1
+    assert failed["correlation_id"] == str(CORRELATION_ID)
