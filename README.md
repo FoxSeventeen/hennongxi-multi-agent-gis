@@ -171,6 +171,11 @@ PostGIS、Redis、离线影像缓存和已生成成果的命名卷。
 
 ## 项目文档
 
+- [`docs/architecture.md`](docs/architecture.md)：组件职责、工作流、状态机、数据流与安全边界。
+- [`docs/setup.md`](docs/setup.md)：目标机器首次安装、真实配置、数据卷和上游冒烟。
+- [`docs/demo-runbook.md`](docs/demo-runbook.md)：答辩前演练、现场讲解、失败/重试和离线降级步骤。
+- [`docs/verification.md`](docs/verification.md)：T28 目标机验收清单与脱敏证据模板。
+- [`docs/troubleshooting.md`](docs/troubleshooting.md)：按症状定位依赖并做非破坏性恢复。
 - [`docs/spec.md`](docs/spec.md)：已批准的产品与工程规格。
 - [`docs/development.md`](docs/development.md)：开发、集成测试和各 Agent 的详细验证命令。
 - [`docs/openapi.yaml`](docs/openapi.yaml)：公开接口契约。
@@ -180,5 +185,5 @@ PostGIS、Redis、离线影像缓存和已生成成果的命名卷。
 
 ## 当前交接状态
 
-T01–T27 已完成。T28 的文档编写、目标机真实演练和交接证据仍需按步骤完成；在真实演练通过前，
-不得对外声称项目已经完成最终答辩验收。
+T01–T27 已完成，T28 的中文交接文档初稿也已齐备。目标机真实演练、文档实机验证和具名交接
+证据仍需接手人按步骤完成；在真实演练通过前，不得对外声称项目已经完成最终答辩验收。
